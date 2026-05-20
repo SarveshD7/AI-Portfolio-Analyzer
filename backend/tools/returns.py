@@ -41,11 +41,9 @@ def calculate_portfolio_returns(tickers: list, weights: list, period: str = "1y"
     # Total return: compound the daily returns
     total_return = ((1 + portfolio_daily).prod() - 1) * 100
 
-    # Last 30 days for charting
-    last_30 = portfolio_daily.tail(30)
     daily_returns = [
         {"date": str(date.date()), "return": round(float(val) * 100, 4)}
-        for date, val in last_30.items()
+        for date, val in portfolio_daily.items()
     ]
 
     return {

@@ -1,9 +1,12 @@
 from datetime import datetime
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from tools.returns import calculate_portfolio_returns
+from agent import run_agent
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -26,7 +29,7 @@ class AnalyzeRequest(BaseModel):
     tickers: list[str]
     weights: list[float]
     period: str = "1y"
-    # future fields: query: str, intent: str
+    question: str = "How has my portfolio performed?"
 
 
 @app.post("/analyze")
@@ -39,10 +42,17 @@ def analyze(body: AnalyzeRequest):
     if abs(total - 1.0) > 0.01:
         raise HTTPException(status_code=422, detail=f"Weights must sum to 1.0, got {total}.")
 
-    # LLM routing will go here — for now route directly to returns tool
+    portfolio = {
+        "tickers": body.tickers,
+        "weights": body.weights,
+        "period": body.period,
+    }
+
     try:
-        return calculate_portfolio_returns(body.tickers, body.weights, body.period)
+        return run_agent(portfolio, body.question)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

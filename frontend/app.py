@@ -17,11 +17,23 @@ PERIOD_MAP = {
 st.title("Kalpi Portfolio Analyzer")
 
 uploaded = st.file_uploader("Upload portfolio CSV (columns: Ticker, Weight)", type="csv")
-period_label = st.selectbox("Period", list(PERIOD_MAP.keys()), index=3)
 
-if st.button("Calculate Returns"):
+question = st.text_input(
+    "Ask about your portfolio",
+    placeholder="e.g. What's my 6-month return? / How did I do last year?",
+)
+
+# period_label = st.selectbox(
+#     "Default period (used if not mentioned in your question)",
+#     list(PERIOD_MAP.keys()),
+#     index=3,
+# )
+
+if st.button("Analyze"):
     if uploaded is None:
         st.error("Please upload a portfolio CSV file.")
+    elif not question.strip():
+        st.error("Please enter a question about your portfolio.")
     else:
         df = pd.read_csv(io.StringIO(uploaded.getvalue().decode("utf-8")))
 
@@ -37,30 +49,36 @@ if st.button("Calculate Returns"):
                 payload = {
                     "tickers": df["Ticker"].tolist(),
                     "weights": df["Weight"].tolist(),
-                    "period": PERIOD_MAP[period_label],
+                    "period": "1y",
+                    "question": question.strip(),
                 }
                 try:
-                    resp = requests.post("http://localhost:8000/analyze", json=payload)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        st.metric("Total Return", f"{data['total_return_pct']}%")
-                        st.caption(f"Period: {data['period']}")
+                    with st.spinner("Analyzing..."):
+                        resp = requests.post("http://localhost:8000/analyze", json=payload)
 
-                        daily = pd.DataFrame(data["daily_returns"])
-                        fig = go.Figure(
-                            go.Scatter(
-                                x=daily["date"],
-                                y=daily["return"],
-                                mode="lines",
-                                name="Daily Return (%)",
+                    if resp.status_code == 200:
+                        result = resp.json()
+
+                        with st.chat_message("assistant"):
+                            st.markdown(result["response"])
+
+                        data = result.get("data", {})
+                        if result.get("visualization") == "line_chart" and data.get("daily_returns"):
+                            daily = pd.DataFrame(data["daily_returns"])
+                            fig = go.Figure(
+                                go.Scatter(
+                                    x=daily["date"],
+                                    y=daily["return"],
+                                    mode="lines",
+                                    name="Daily Return (%)",
+                                )
                             )
-                        )
-                        fig.update_layout(
-                            title="Daily Portfolio Returns (last 30 days)",
-                            xaxis_title="Date",
-                            yaxis_title="Return (%)",
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
+                            fig.update_layout(
+                                title=f"Daily Portfolio Returns ({data.get('period', '')})",
+                                xaxis_title="Date",
+                                yaxis_title="Return (%)",
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.error(f"Backend error: {resp.json().get('detail', resp.text)}")
                 except requests.exceptions.ConnectionError:

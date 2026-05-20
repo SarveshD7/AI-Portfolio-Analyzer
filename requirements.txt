@@ -7,5 +7,7 @@ numpy
 openai
 langchain
 langgraph
+langchain-groq
+langchain-core
 python-dotenv
 plotly
