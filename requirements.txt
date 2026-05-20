@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+streamlit
+yfinance
+pandas
+numpy
+openai
+langchain
+langgraph
+python-dotenv
+plotly
