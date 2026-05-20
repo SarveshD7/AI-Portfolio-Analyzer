@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Kalpi Portfolio Analyzer", layout="wide")
 
@@ -208,11 +209,30 @@ else:
             unsafe_allow_html=True,
         )
 
-        # Message history
-        chat_container = st.container()
-        with chat_container:
+        # Fixed-height scrollable message area
+        with st.container(height=420):
             for msg in st.session_state.messages:
                 chat_bubble(msg["role"], msg["content"])
+
+        # Auto-scroll the height-constrained container to the bottom on every rerun.
+        # Streamlit wraps st.container(height=N) in a div with data-testid="stVerticalBlockBorderWrapper".
+        components.html(
+            """<script>
+            setTimeout(function () {
+                try {
+                    var containers = window.parent.document.querySelectorAll(
+                        '[data-testid="stVerticalBlockBorderWrapper"]'
+                    );
+                    containers.forEach(function (el) {
+                        if (el.scrollHeight > el.clientHeight) {
+                            el.scrollTop = el.scrollHeight;
+                        }
+                    });
+                } catch (e) {}
+            }, 120);
+            </script>""",
+            height=0,
+        )
 
         # Input form
         with st.form("chat_form", clear_on_submit=True):
