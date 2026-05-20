@@ -72,14 +72,50 @@ def render_canvas(viz_type: str, viz_data: dict):
             st.metric("Total Return", f"{viz_data.get('total_return_pct', 0):+.2f}%")
 
     elif viz_type == "metrics":
+        sharpe = viz_data.get("sharpe_ratio", 0)
         period = viz_data.get("period", "")
-        st.caption(f"Period: {period}")
-        c1, c2 = st.columns(2)
-        c1.metric("Total Return", f"{viz_data.get('total_return_pct', 0):+.2f}%")
-        c2.metric("Annualized Return", f"{viz_data.get('annualized_return_pct', 0):+.2f}%")
-        c3, c4 = st.columns(2)
-        c3.metric("Annualized Volatility", f"{viz_data.get('annualized_volatility_pct', 0):.2f}%")
-        c4.metric("Sharpe Ratio", f"{viz_data.get('sharpe_ratio', 0):.2f}")
+
+        if sharpe > 1.0:
+            s_color, s_bg, s_label, interp = (
+                "#1e7e34", "#e6f4ea", "Good",
+                "Strong risk-adjusted returns. The portfolio is well-compensated for the volatility it carries.",
+            )
+        elif sharpe >= 0.5:
+            s_color, s_bg, s_label, interp = (
+                "#856404", "#fff3cd", "Moderate",
+                "Acceptable risk-adjusted returns. There may be room to improve the return-to-risk profile.",
+            )
+        else:
+            s_color, s_bg, s_label, interp = (
+                "#842029", "#f8d7da", "Poor",
+                "Weak risk-adjusted returns. The portfolio may not be adequately compensating for the risk taken.",
+            )
+
+        st.markdown(
+            f"""<div style="text-align:center;padding:24px 16px;background:{s_bg};
+              border-radius:12px;margin-bottom:20px">
+              <div style="font-size:12px;color:{s_color};font-weight:600;
+                letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">
+                Sharpe Ratio &nbsp;·&nbsp; {period}
+              </div>
+              <div style="font-size:52px;font-weight:700;color:{s_color};line-height:1">
+                {sharpe:.2f}
+              </div>
+              <div style="font-size:13px;color:{s_color};margin-top:8px;
+                background:rgba(0,0,0,.07);display:inline-block;
+                padding:2px 10px;border-radius:10px;font-weight:600">
+                {s_label}
+              </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Annualized Return", f"{viz_data.get('annualized_return_pct', 0):+.2f}%")
+        c2.metric("Annualized Volatility", f"{viz_data.get('annualized_volatility_pct', 0):.2f}%")
+        c3.metric("Risk-Free Rate", f"{viz_data.get('risk_free_rate_pct', 6.0):.1f}%")
+
+        st.info(interp)
 
     elif viz_type == "pie_chart":
         tickers = viz_data.get("tickers", [])
