@@ -188,6 +188,43 @@ def render_canvas(viz_type: str, viz_data: dict):
             )
             st.plotly_chart(fig, use_container_width=True)
 
+    elif viz_type == "portfolio_pie":
+        holdings = viz_data.get("holdings", [])
+        if holdings:
+            names = [h["name"] for h in holdings]
+            wts = [h["weight_pct"] for h in holdings]
+
+            fig = go.Figure(go.Pie(
+                labels=names,
+                values=wts,
+                hole=0.35,
+                textinfo="label+percent",
+                textposition="auto",
+                marker=dict(line=dict(color="white", width=2)),
+            ))
+            fig.update_layout(
+                title="Portfolio Composition",
+                margin=dict(t=48, b=32, l=8, r=8),
+                paper_bgcolor="white",
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            c1, c2 = st.columns(2)
+            c1.metric("Total Holdings", viz_data.get("total_holdings", 0))
+            largest = viz_data.get("largest_holding", {})
+            c2.metric(
+                "Largest Position",
+                f"{largest.get('weight_pct', 0):.1f}%",
+                delta=largest.get("name", ""),
+                delta_color="off",
+            )
+
+            st.markdown("**All Holdings**")
+            df = pd.DataFrame(holdings)[["name", "ticker", "weight_pct"]]
+            df.columns = ["Company", "Ticker", "Weight (%)"]
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
     else:
         st.markdown(
             """<div style="display:flex;align-items:center;justify-content:center;

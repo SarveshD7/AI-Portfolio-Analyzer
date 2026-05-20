@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 
+from tools.portfolio_info import get_portfolio_composition
 from tools.returns import calculate_portfolio_returns
 from tools.risk import calculate_sharpe_ratio, calculate_max_drawdown
 
@@ -55,6 +56,18 @@ def max_drawdown_tool(tickers: list, weights: list, period: str = "1y") -> dict:
     return calculate_max_drawdown(tickers, weights, period)
 
 
+@tool
+def portfolio_composition_tool(tickers: list, weights: list) -> dict:
+    """Shows portfolio composition and individual stock holdings with weights.
+    Use when user asks 'what's in my portfolio', 'show my holdings', 'how much X do I have', or 'what do I own'.
+
+    Args:
+        tickers: List of stock ticker symbols (e.g. ['RELIANCE.NS', 'TCS.NS'])
+        weights: List of portfolio weights corresponding to each ticker (must sum to 1.0)
+    """
+    return get_portfolio_composition(tickers, weights)
+
+
 # ---------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------
@@ -66,8 +79,8 @@ class AgentState(TypedDict):
     messages: list
     tool_results: dict
     needs_tool: bool
-    visualization_type: str   # "line_chart" | "metrics" | "pie_chart" | "drawdown_chart" | ""
-    tool_name: str            # "returns" | "sharpe" | "drawdown" | ""
+    visualization_type: str   # "line_chart" | "metrics" | "pie_chart" | "drawdown_chart" | "portfolio_pie" | ""
+    tool_name: str            # "returns" | "sharpe" | "drawdown" | "portfolio_info" | ""
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +95,7 @@ def analyze_question(state: AgentState) -> AgentState:
         f'Respond with exactly this structure:\n'
         f'{{"needs_tool": true, "period": "1y", "visualization_type": "line_chart", "tool_name": "returns"}}\n\n'
         f'Rules for needs_tool:\n'
-        f'- true: question is about returns, performance, gains, losses, risk, sharpe, volatility, or allocation.\n'
+        f'- true: question is about returns, performance, gains, losses, risk, sharpe, volatility, allocation, or holdings.\n'
         f'- false: unrelated question (weather, cooking, etc.).\n\n'
         f'Rules for period (extract from question, else use default "{state["period"]}"):\n'
         f'  "1 month" / "30 days"                           → "1mo"\n'
@@ -95,8 +108,9 @@ def analyze_question(state: AgentState) -> AgentState:
         f'  "return"/"performance"/"gain"/"loss"/"how did"/"trend"  → tool_name:"returns",  visualization_type:"line_chart"\n'
         f'  "sharpe"/"risk"/"volatility"/"risky"/"risk-adjusted"    → tool_name:"sharpe",   visualization_type:"metrics"\n'
         f'  "drawdown"/"worst loss"/"biggest drop"/"max drop"      → tool_name:"drawdown", visualization_type:"drawdown_chart"\n'
-        f'  "allocation"/"sector"/"breakdown"/"diversification"     → tool_name:"",         visualization_type:"pie_chart"\n'
-        f'  unrelated question (needs_tool:false)                   → tool_name:"",         visualization_type:""\n'
+        f'  "allocation"/"sector"/"breakdown"/"diversification"       → tool_name:"",              visualization_type:"pie_chart"\n'
+        f'  "what\'s in"/"holdings"/"what do I own"/"show stocks"   → tool_name:"portfolio_info", visualization_type:"portfolio_pie"\n'
+        f'  unrelated question (needs_tool:false)                   → tool_name:"",              visualization_type:""\n'
         f'  default for any other portfolio question                 → tool_name:"returns",  visualization_type:"line_chart"'
     )
 
@@ -131,11 +145,14 @@ def call_tool(state: AgentState) -> AgentState:
     tickers = state["portfolio"]["tickers"]
     weights = state["portfolio"]["weights"]
     period = state["period"]
+    tool_name = state.get("tool_name", "returns")
 
-    if state.get("tool_name") == "sharpe":
+    if tool_name == "sharpe":
         result = calculate_sharpe_ratio(tickers, weights, period)
-    elif state.get("tool_name") == "drawdown":
+    elif tool_name == "drawdown":
         result = calculate_max_drawdown(tickers, weights, period)
+    elif tool_name == "portfolio_info":
+        result = get_portfolio_composition(tickers, weights)
     else:
         result = calculate_portfolio_returns(tickers, weights, period)
 
@@ -153,15 +170,27 @@ def generate_response(state: AgentState) -> AgentState:
             f"This is not a portfolio question. Politely decline in one sentence."
         )
     elif viz_type == "pie_chart":
-        holdings = "\n".join(
+        holdings_text = "\n".join(
             f"  - {t}: {w * 100:.1f}%"
             for t, w in zip(state["portfolio"]["tickers"], state["portfolio"]["weights"])
         )
         prompt = (
             f"You are a portfolio analysis assistant.\n\n"
-            f"Portfolio allocation:\n{holdings}\n\n"
+            f"Portfolio allocation:\n{holdings_text}\n\n"
             f'Question: "{state["question"]}"\n\n'
             f"Write 2 conversational sentences describing this allocation."
+        )
+    elif viz_type == "portfolio_pie" and tool_results:
+        lines = "\n".join(
+            f"  - {h['name']} ({h['ticker']}): {h['weight_pct']}%"
+            for h in tool_results.get("holdings", [])
+        )
+        prompt = (
+            f"You are a portfolio analysis assistant.\n\n"
+            f'Question: "{state["question"]}"\n\n'
+            f"Portfolio holdings:\n{lines}\n\n"
+            f"Write 2–3 conversational sentences summarising what the user owns, "
+            f"mentioning the largest position."
         )
     elif viz_type == "drawdown_chart" and tool_results:
         d = tool_results
@@ -272,6 +301,9 @@ def _build_visualization(viz_type: str, tool_results: dict, portfolio: dict) -> 
 
     if viz_type == "drawdown_chart" and tool_results:
         return {"type": "drawdown_chart", "data": tool_results}
+
+    if viz_type == "portfolio_pie" and tool_results:
+        return {"type": "portfolio_pie", "data": tool_results}
 
     if viz_type == "pie_chart":
         return {
