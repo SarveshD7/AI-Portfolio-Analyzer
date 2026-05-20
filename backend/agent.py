@@ -1,284 +1,232 @@
 import json
 import os
-from typing import TypedDict, Annotated
 
 from dotenv import load_dotenv
 from langchain.tools import tool
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_groq import ChatGroq
-from langgraph.graph import StateGraph, END
 
+from tools.benchmark import benchmark_portfolio
+from tools.concentration import analyze_concentration
+from tools.correlation import calculate_correlation
 from tools.portfolio_info import get_portfolio_composition
 from tools.returns import calculate_portfolio_returns
-from tools.risk import calculate_sharpe_ratio, calculate_max_drawdown
+from tools.risk import calculate_sharpe_ratio, calculate_max_drawdown, calculate_var
 
 load_dotenv()
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
-
+# ---------------------------------------------------------------------------
+# Tools  (docstrings drive LLM tool selection — keep them descriptive)
+# ---------------------------------------------------------------------------
 
 @tool
 def portfolio_returns_tool(tickers: list, weights: list, period: str = "1y") -> dict:
-    """Calculate historical returns for a portfolio of stocks.
-    Use when the user asks about returns, performance, gains, losses, or how the portfolio did.
+    """Calculate historical portfolio returns over a time period.
+
+    Use when the user asks about:
+    - How the portfolio performed / did
+    - Returns, gains, losses, or profit
+    - Performance over a specific period
+    - "How much did I make / lose?"
 
     Args:
-        tickers: List of stock ticker symbols (e.g. ['RELIANCE.NS', 'TCS.NS'])
-        weights: List of portfolio weights corresponding to each ticker (must sum to 1.0)
-        period: Time period — one of '1mo', '3mo', '6mo', '1y', '3y', '5y'
+        tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
+        weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
     """
     return calculate_portfolio_returns(tickers, weights, period)
 
 
 @tool
 def sharpe_ratio_tool(tickers: list, weights: list, period: str = "1y") -> dict:
-    """Calculates Sharpe ratio (risk-adjusted return metric), annualized return, and volatility.
-    Use when the user asks about risk, Sharpe ratio, volatility, or risk-adjusted performance.
+    """Calculate Sharpe ratio and risk-adjusted return metrics.
+
+    Use when the user asks about:
+    - Sharpe ratio or risk-adjusted returns
+    - Volatility or standard deviation
+    - Whether returns justify the risk taken
 
     Args:
-        tickers: List of stock ticker symbols (e.g. ['RELIANCE.NS', 'TCS.NS'])
-        weights: List of portfolio weights corresponding to each ticker (must sum to 1.0)
-        period: Time period — one of '1mo', '3mo', '6mo', '1y', '3y', '5y'
+        tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
+        weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
     """
     return calculate_sharpe_ratio(tickers, weights, period)
 
 
 @tool
 def max_drawdown_tool(tickers: list, weights: list, period: str = "1y") -> dict:
-    """Calculates maximum drawdown — the largest peak-to-trough decline in portfolio value.
-    Use when the user asks about worst loss, biggest drop, drawdown, or how bad things got.
+    """Calculate maximum drawdown — the worst peak-to-trough decline.
+
+    Use when the user asks about:
+    - Drawdown or maximum drawdown
+    - Worst loss or biggest historical drop
+    - How bad things got / peak and trough dates
 
     Args:
-        tickers: List of stock ticker symbols (e.g. ['RELIANCE.NS', 'TCS.NS'])
-        weights: List of portfolio weights corresponding to each ticker (must sum to 1.0)
-        period: Time period — one of '1mo', '3mo', '6mo', '1y', '3y', '5y'
+        tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
+        weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
     """
     return calculate_max_drawdown(tickers, weights, period)
 
 
 @tool
-def portfolio_composition_tool(tickers: list, weights: list) -> dict:
-    """Shows portfolio composition and individual stock holdings with weights.
-    Use when user asks 'what's in my portfolio', 'show my holdings', 'how much X do I have', or 'what do I own'.
+def var_tool(tickers: list, weights: list, period: str = "1y") -> dict:
+    """Calculate Value at Risk (VaR) and tail risk metrics.
+
+    Use when the user asks about:
+    - Value at Risk (VaR)
+    - How much they could lose on a bad day
+    - Tail risk, downside risk, or expected shortfall (CVaR)
+    - Worst-case daily loss scenarios
 
     Args:
-        tickers: List of stock ticker symbols (e.g. ['RELIANCE.NS', 'TCS.NS'])
-        weights: List of portfolio weights corresponding to each ticker (must sum to 1.0)
+        tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
+        weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
+    """
+    return calculate_var(tickers, weights, period)
+
+
+@tool
+def benchmark_tool(
+    tickers: list,
+    weights: list,
+    period: str = "1y",
+    benchmark: str = "^NSEI",
+) -> dict:
+    """Compare portfolio performance against a market index benchmark.
+
+    Use when the user asks about:
+    - How the portfolio compares to an index (Nifty, Sensex, S&P 500, etc.)
+    - Whether the portfolio beat or underperformed the market
+    - Alpha or beta relative to a benchmark
+    - "Did I beat the Nifty / S&P 500?"
+    - Relative performance vs an index
+
+    Args:
+        tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
+        weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
+        benchmark: Index ticker or alias. Common values:
+            "^NSEI"    / "nifty50"   → Nifty 50  (default)
+            "^BSESN"   / "sensex"    → BSE Sensex
+            "^GSPC"    / "sp500"     → S&P 500
+            "^IXIC"    / "nasdaq"    → NASDAQ Composite
+            "^DJI"     / "dow"       → Dow Jones
+            "^NSEBANK" / "niftybank" → Nifty Bank
+    """
+    return benchmark_portfolio(tickers, weights, period, benchmark)
+
+
+@tool
+def correlation_tool(tickers: list, weights: list, period: str = "1y") -> dict:
+    """Compute pairwise correlation between all assets in the portfolio.
+
+    Use when the user asks about:
+    - Correlation between stocks / assets / holdings
+    - How much their assets move together
+    - Whether the portfolio is well-diversified or all moving in sync
+    - Which stocks are most / least correlated
+    - Concentration risk due to correlated assets
+    - Correlation matrix or heatmap
+
+    Args:
+        tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
+        weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
+    """
+    return calculate_correlation(tickers, weights, period)
+
+
+@tool
+def concentration_tool(tickers: list, weights: list, breakdown_type: str = "sector") -> dict:
+    """Analyze portfolio concentration by sector, asset class, or market-cap factor.
+
+    Use when the user asks about:
+    - Sector concentration or sector exposure (e.g., "Am I too heavy in Tech?")
+    - Whether they are secretly over-indexed to a single sector
+    - Asset class breakdown (equity vs ETF vs crypto vs mutual fund)
+    - Factor exposure or market-cap tiers: Large Cap vs Mid Cap vs Small Cap
+    - Momentum, Value, or Growth factor concentration (use breakdown_type="factor")
+    - Hidden concentration risk or diversification across sectors/classes
+
+    Args:
+        tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
+        weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
+        breakdown_type: "sector" for sector breakdown, "asset_class" for equity/ETF/crypto,
+                        "factor" for Large Cap / Mid Cap / Small Cap market-cap factor tiers
+    """
+    return analyze_concentration(tickers, weights, breakdown_type)
+
+
+@tool
+def portfolio_composition_tool(tickers: list, weights: list) -> dict:
+    """Show portfolio composition with company names and allocation weights.
+
+    Use when the user asks about:
+    - What stocks are in the portfolio / what they own
+    - Portfolio holdings or composition
+    - Allocation or sector breakdown
+
+    Args:
+        tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
+        weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
     """
     return get_portfolio_composition(tickers, weights)
 
 
 # ---------------------------------------------------------------------------
-# State
+# Agent setup
 # ---------------------------------------------------------------------------
 
-class AgentState(TypedDict):
-    portfolio: dict           # {"tickers": [...], "weights": [...], "period": "1y"}
-    question: str
-    period: str               # resolved period (extracted or default)
-    messages: list
-    tool_results: dict
-    needs_tool: bool
-    visualization_type: str   # "line_chart" | "metrics" | "pie_chart" | "drawdown_chart" | "portfolio_pie" | ""
-    tool_name: str            # "returns" | "sharpe" | "drawdown" | "portfolio_info" | ""
+_tools = [
+    portfolio_returns_tool,
+    sharpe_ratio_tool,
+    max_drawdown_tool,
+    var_tool,
+    portfolio_composition_tool,
+    concentration_tool,
+    correlation_tool,
+    benchmark_tool,
+]
 
+_tool_map = {t.name: t for t in _tools}
 
-# ---------------------------------------------------------------------------
-# Nodes
-# ---------------------------------------------------------------------------
+_llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
+_llm_with_tools = _llm.bind_tools(_tools)
 
-def analyze_question(state: AgentState) -> AgentState:
-    """Determine tool, period, and visualization type from the question."""
-    prompt = (
-        f'Analyze this portfolio question and respond with JSON only — no other text.\n\n'
-        f'Question: "{state["question"]}"\n\n'
-        f'Respond with exactly this structure:\n'
-        f'{{"needs_tool": true, "period": "1y", "visualization_type": "line_chart", "tool_name": "returns"}}\n\n'
-        f'Rules for needs_tool:\n'
-        f'- true: question is about returns, performance, gains, losses, risk, sharpe, volatility, allocation, or holdings.\n'
-        f'- false: unrelated question (weather, cooking, etc.).\n\n'
-        f'Rules for period (extract from question, else use default "{state["period"]}"):\n'
-        f'  "1 month" / "30 days"                           → "1mo"\n'
-        f'  "3 months" / "quarter"                          → "3mo"\n'
-        f'  "6 months" / "half year"                        → "6mo"\n'
-        f'  "1 year" / "last year" / "past year" / "yearly" → "1y"\n'
-        f'  "3 years"                                       → "3y"\n'
-        f'  "5 years"                                       → "5y"\n\n'
-        f'Rules for tool_name + visualization_type:\n'
-        f'  "return"/"performance"/"gain"/"loss"/"how did"/"trend"  → tool_name:"returns",  visualization_type:"line_chart"\n'
-        f'  "sharpe"/"risk"/"volatility"/"risky"/"risk-adjusted"    → tool_name:"sharpe",   visualization_type:"metrics"\n'
-        f'  "drawdown"/"worst loss"/"biggest drop"/"max drop"      → tool_name:"drawdown", visualization_type:"drawdown_chart"\n'
-        f'  "allocation"/"sector"/"breakdown"/"diversification"       → tool_name:"",              visualization_type:"pie_chart"\n'
-        f'  "what\'s in"/"holdings"/"what do I own"/"show stocks"   → tool_name:"portfolio_info", visualization_type:"portfolio_pie"\n'
-        f'  unrelated question (needs_tool:false)                   → tool_name:"",              visualization_type:""\n'
-        f'  default for any other portfolio question                 → tool_name:"returns",  visualization_type:"line_chart"'
-    )
+_SYSTEM_PROMPT = """You are a portfolio analysis assistant.
 
-    response = llm.invoke([HumanMessage(content=prompt)])
+Use the available tools to answer questions about the user's portfolio.
+The portfolio's tickers and weights are in the human message — always pass
+those exact values when calling tools.
 
-    try:
-        content = response.content.strip()
-        if "```" in content:
-            content = content.split("```")[1]
-            if content.startswith("json"):
-                content = content[4:]
-        parsed = json.loads(content.strip())
-        needs_tool = bool(parsed.get("needs_tool", True))
-        period = parsed.get("period", state["period"])
-        visualization_type = parsed.get("visualization_type", "line_chart")
-        tool_name = parsed.get("tool_name", "returns")
-    except (json.JSONDecodeError, KeyError, IndexError):
-        needs_tool = True
-        period = state["period"]
-        visualization_type = "line_chart"
-        tool_name = "returns"
+Period mapping (extract from the question; default to "1y" if unspecified):
+  "1 month" / "30 days"                          → "1mo"
+  "3 months" / "quarter"                          → "3mo"
+  "6 months" / "half year"                        → "6mo"
+  "1 year" / "last year" / "past year" / "yearly" → "1y"
+  "3 years"                                        → "3y"
+  "5 years"                                        → "5y"
 
-    return {**state, "needs_tool": needs_tool, "period": period,
-            "visualization_type": visualization_type, "tool_name": tool_name}
+After calling a tool, respond conversationally in 2–3 sentences:
+- Explain the results in plain English
+- Embed the specific numbers from the tool result
+- Provide brief context or interpretation"""
 
-
-def call_tool(state: AgentState) -> AgentState:
-    """Dispatch to the correct tool based on tool_name."""
-    if state.get("visualization_type") == "pie_chart":
-        return state
-
-    tickers = state["portfolio"]["tickers"]
-    weights = state["portfolio"]["weights"]
-    period = state["period"]
-    tool_name = state.get("tool_name", "returns")
-
-    if tool_name == "sharpe":
-        result = calculate_sharpe_ratio(tickers, weights, period)
-    elif tool_name == "drawdown":
-        result = calculate_max_drawdown(tickers, weights, period)
-    elif tool_name == "portfolio_info":
-        result = get_portfolio_composition(tickers, weights)
-    else:
-        result = calculate_portfolio_returns(tickers, weights, period)
-
-    return {**state, "tool_results": result}
-
-
-def generate_response(state: AgentState) -> AgentState:
-    """Use the LLM to produce a conversational answer."""
-    viz_type = state.get("visualization_type", "")
-    tool_results = state.get("tool_results", {})
-
-    if not state.get("needs_tool"):
-        prompt = (
-            f'The user asked: "{state["question"]}"\n\n'
-            f"This is not a portfolio question. Politely decline in one sentence."
-        )
-    elif viz_type == "pie_chart":
-        holdings_text = "\n".join(
-            f"  - {t}: {w * 100:.1f}%"
-            for t, w in zip(state["portfolio"]["tickers"], state["portfolio"]["weights"])
-        )
-        prompt = (
-            f"You are a portfolio analysis assistant.\n\n"
-            f"Portfolio allocation:\n{holdings_text}\n\n"
-            f'Question: "{state["question"]}"\n\n'
-            f"Write 2 conversational sentences describing this allocation."
-        )
-    elif viz_type == "portfolio_pie" and tool_results:
-        lines = "\n".join(
-            f"  - {h['name']} ({h['ticker']}): {h['weight_pct']}%"
-            for h in tool_results.get("holdings", [])
-        )
-        prompt = (
-            f"You are a portfolio analysis assistant.\n\n"
-            f'Question: "{state["question"]}"\n\n'
-            f"Portfolio holdings:\n{lines}\n\n"
-            f"Write 2–3 conversational sentences summarising what the user owns, "
-            f"mentioning the largest position."
-        )
-    elif viz_type == "drawdown_chart" and tool_results:
-        d = tool_results
-        status = "not yet recovered" if d.get("currently_in_drawdown") else f"recovered on {d.get('recovery_date')}"
-        prompt = (
-            f"You are a portfolio analysis assistant.\n\n"
-            f'Question: "{state["question"]}"\n\n'
-            f"Max drawdown analysis for {d['period']}:\n"
-            f"  Max Drawdown : {d['max_drawdown_pct']}%\n"
-            f"  Peak Date    : {d['peak_date']}\n"
-            f"  Trough Date  : {d['trough_date']}\n"
-            f"  Recovery     : {status}\n\n"
-            f"Write 2–3 sentences interpreting this drawdown for the user."
-        )
-    elif viz_type == "metrics" and tool_results:
-        d = tool_results
-        holdings = "\n".join(
-            f"  - {t}: {w * 100:.1f}%"
-            for t, w in zip(state["portfolio"]["tickers"], state["portfolio"]["weights"])
-        )
-        prompt = (
-            f"You are a portfolio analysis assistant.\n\n"
-            f"Portfolio:\n{holdings}\n\n"
-            f'Question: "{state["question"]}"\n\n'
-            f"Risk metrics for {d['period']}:\n"
-            f"  Sharpe Ratio         : {d['sharpe_ratio']}\n"
-            f"  Annualized Return    : {d['annualized_return_pct']}%\n"
-            f"  Annualized Volatility: {d['annualized_volatility_pct']}%\n"
-            f"  Risk-Free Rate       : {d['risk_free_rate_pct']}%\n\n"
-            f"Write 2–3 sentences interpreting these numbers for the user."
-        )
-    elif tool_results:
-        d = tool_results
-        holdings = "\n".join(
-            f"  - {t}: {w * 100:.1f}%"
-            for t, w in zip(state["portfolio"]["tickers"], state["portfolio"]["weights"])
-        )
-        prompt = (
-            f"You are a portfolio analysis assistant.\n\n"
-            f"Portfolio:\n{holdings}\n\n"
-            f'Question: "{state["question"]}"\n\n'
-            f"Result — Period: {d['period']}, Total Return: {d['total_return_pct']}%\n\n"
-            f"Write 2–3 conversational sentences directly answering the question with these numbers."
-        )
-    else:
-        prompt = (
-            f'The user asked: "{state["question"]}"\n\n'
-            f"No data is available. Politely explain you can only help with portfolio analysis."
-        )
-
-    response = llm.invoke([HumanMessage(content=prompt)])
-    updated_messages = state.get("messages", []) + [AIMessage(content=response.content)]
-    return {**state, "messages": updated_messages}
-
-
-# ---------------------------------------------------------------------------
-# Routing
-# ---------------------------------------------------------------------------
-
-def route_after_analysis(state: AgentState) -> str:
-    return "call_tool" if state.get("needs_tool") else "generate_response"
-
-
-# ---------------------------------------------------------------------------
-# Graph
-# ---------------------------------------------------------------------------
-
-def _build_graph():
-    graph = StateGraph(AgentState)
-
-    graph.add_node("analyze_question", analyze_question)
-    graph.add_node("call_tool", call_tool)
-    graph.add_node("generate_response", generate_response)
-
-    graph.set_entry_point("analyze_question")
-
-    graph.add_conditional_edges(
-        "analyze_question",
-        route_after_analysis,
-        {"call_tool": "call_tool", "generate_response": "generate_response"},
-    )
-    graph.add_edge("call_tool", "generate_response")
-    graph.add_edge("generate_response", END)
-
-    return graph.compile()
-
-
-_graph = _build_graph()
+# Maps called tool name → canvas visualization type
+_TOOL_VIZ_MAP = {
+    "portfolio_returns_tool":     "line_chart",
+    "sharpe_ratio_tool":          "metrics",
+    "var_tool":                   "metrics",
+    "max_drawdown_tool":          "drawdown_chart",
+    "portfolio_composition_tool": "portfolio_pie",
+    "concentration_tool":         "concentration_pie",
+    "correlation_tool":           "correlation_heatmap",
+    "benchmark_tool":             "benchmark_chart",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -295,25 +243,18 @@ def _build_visualization(viz_type: str, tool_results: dict, portfolio: dict) -> 
                 "total_return_pct": tool_results.get("total_return_pct", 0),
             },
         }
-
     if viz_type == "metrics" and tool_results:
         return {"type": "metrics", "data": tool_results}
-
     if viz_type == "drawdown_chart" and tool_results:
         return {"type": "drawdown_chart", "data": tool_results}
-
     if viz_type == "portfolio_pie" and tool_results:
         return {"type": "portfolio_pie", "data": tool_results}
-
-    if viz_type == "pie_chart":
-        return {
-            "type": "pie_chart",
-            "data": {
-                "tickers": portfolio.get("tickers", []),
-                "weights": portfolio.get("weights", []),
-            },
-        }
-
+    if viz_type == "concentration_pie" and tool_results:
+        return {"type": "concentration_pie", "data": tool_results}
+    if viz_type == "correlation_heatmap" and tool_results:
+        return {"type": "correlation_heatmap", "data": tool_results}
+    if viz_type == "benchmark_chart" and tool_results:
+        return {"type": "benchmark_chart", "data": tool_results}
     return {"type": None, "data": {}}
 
 
@@ -322,35 +263,69 @@ def _build_visualization(viz_type: str, tool_results: dict, portfolio: dict) -> 
 # ---------------------------------------------------------------------------
 
 def run_agent(portfolio: dict, question: str) -> dict:
-    """Run the LangGraph agent.
+    """Run the tool-calling agent using bind_tools.
 
     Args:
         portfolio: {"tickers": [...], "weights": [...], "period": "1y"}
-        question: Natural language question about the portfolio
+        question:  Natural language question about the portfolio
 
     Returns:
         {"response": str, "visualization": {"type": str, "data": dict}}
     """
-    initial_state = {
-        "portfolio": portfolio,
-        "question": question,
-        "period": portfolio.get("period", "1y"),
-        "messages": [],
-        "tool_results": {},
-        "needs_tool": True,
-        "visualization_type": "line_chart",
-        "tool_name": "returns",
-    }
-
-    final_state = _graph.invoke(initial_state)
-
-    visualization = _build_visualization(
-        final_state.get("visualization_type", ""),
-        final_state.get("tool_results", {}),
-        portfolio,
+    portfolio_context = "\n".join(
+        f"  - {t}: {w * 100:.1f}%"
+        for t, w in zip(portfolio["tickers"], portfolio["weights"])
+    )
+    formatted_input = (
+        f"Portfolio holdings:\n{portfolio_context}\n\n"
+        f"Tickers: {portfolio['tickers']}\n"
+        f"Weights: {portfolio['weights']}\n\n"
+        f"Question: {question}"
     )
 
+    messages = [
+        SystemMessage(content=_SYSTEM_PROMPT),
+        HumanMessage(content=formatted_input),
+    ]
+
+    try:
+        response = _llm_with_tools.invoke(messages)
+    except Exception as e:
+        raise RuntimeError(f"LLM call failed: {e}")
+
+    called_tool = None
+    tool_results = {}
+
+    if getattr(response, "tool_calls", None):
+        messages.append(response)
+
+        for tc in response.tool_calls:
+            name = tc["name"]
+            args = tc["args"]
+            called_tool = name
+
+            tool_fn = _tool_map.get(name)
+            if tool_fn:
+                raw = tool_fn.invoke(args)
+                if isinstance(raw, dict):
+                    tool_results = raw
+                messages.append(ToolMessage(
+                    content=json.dumps(raw) if isinstance(raw, dict) else str(raw),
+                    tool_call_id=tc["id"],
+                ))
+
+        try:
+            final = _llm_with_tools.invoke(messages)
+            response_text = final.content
+        except Exception as e:
+            raise RuntimeError(f"LLM follow-up call failed: {e}")
+    else:
+        response_text = response.content
+
+    viz_type = _TOOL_VIZ_MAP.get(called_tool, "")
+    visualization = _build_visualization(viz_type, tool_results, portfolio)
+
     return {
-        "response": final_state["messages"][-1].content if final_state["messages"] else "",
+        "response": response_text,
         "visualization": visualization,
     }

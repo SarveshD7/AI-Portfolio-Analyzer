@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
@@ -108,4 +109,44 @@ def calculate_max_drawdown(tickers: list, weights: list, period: str = "1y") -> 
         "currently_in_drawdown": currently_in_drawdown,
         "drawdown_series": drawdown_series,
         "period": period,
+    }
+
+
+def calculate_var(
+    tickers: list,
+    weights: list,
+    period: str = "1y",
+    confidence: float = 0.95,
+) -> dict:
+    """Calculate Value at Risk (VaR) and tail risk metrics using the historical method."""
+    if period not in VALID_PERIODS:
+        raise ValueError(f"Invalid period '{period}'. Must be one of {sorted(VALID_PERIODS)}.")
+
+    portfolio_daily, _ = _download_portfolio_daily(tickers, weights, period)
+
+    if len(portfolio_daily) < 20:
+        raise ValueError("Insufficient data for VaR (need at least 20 trading days).")
+
+    returns_pct = portfolio_daily * 100
+
+    # Historical VaR: nth percentile of the daily return distribution
+    var_95 = float(np.percentile(returns_pct, 5))   # 5th percentile → 1-in-20 bad day
+    var_99 = float(np.percentile(returns_pct, 1))   # 1st percentile → 1-in-100 bad day
+
+    # CVaR (Expected Shortfall) at 95%: mean of all returns worse than VaR 95
+    tail_mask = returns_pct <= var_95
+    cvar_95 = float(returns_pct[tail_mask].mean()) if tail_mask.any() else var_95
+
+    # Worst single day
+    worst_idx = portfolio_daily.idxmin()
+    worst_day_loss = float(portfolio_daily[worst_idx] * 100)
+
+    return {
+        "var_95_pct": round(var_95, 2),
+        "var_99_pct": round(var_99, 2),
+        "cvar_95_pct": round(cvar_95, 2),
+        "worst_day_loss_pct": round(worst_day_loss, 2),
+        "worst_day_date": str(worst_idx.date()),
+        "period": period,
+        "confidence_level": confidence,
     }
