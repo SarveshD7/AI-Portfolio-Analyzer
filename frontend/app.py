@@ -118,6 +118,61 @@ def render_canvas(viz_type: str, viz_data: dict):
 
         st.info(interp)
 
+    elif viz_type == "drawdown_chart":
+        series = viz_data.get("drawdown_series", [])
+        if series:
+            daily = pd.DataFrame(series)
+            max_dd = viz_data.get("max_drawdown_pct", 0)
+            trough_date = viz_data.get("trough_date", "")
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=daily["date"], y=daily["drawdown"],
+                mode="lines",
+                fill="tozeroy",
+                fillcolor="rgba(220,53,69,0.15)",
+                line=dict(color="#dc3545", width=1.5),
+                name="Drawdown (%)",
+            ))
+            if trough_date:
+                fig.add_trace(go.Scatter(
+                    x=[trough_date], y=[max_dd],
+                    mode="markers+text",
+                    marker=dict(color="#dc3545", size=11, symbol="circle"),
+                    text=[f"  {max_dd:.1f}%"],
+                    textposition="middle right",
+                    textfont=dict(color="#dc3545", size=12),
+                    name="Max Drawdown",
+                    showlegend=False,
+                ))
+            fig.update_layout(
+                title=f"Portfolio Drawdown  ·  {viz_data.get('period', '')}",
+                xaxis_title="Date", yaxis_title="Drawdown (%)",
+                margin=dict(t=48, b=32, l=8, r=8),
+                plot_bgcolor="white", paper_bgcolor="white",
+                yaxis=dict(ticksuffix="%"),
+            )
+            fig.update_xaxes(showgrid=True, gridcolor="#f0f0f0")
+            fig.update_yaxes(showgrid=True, gridcolor="#f0f0f0")
+            st.plotly_chart(fig, use_container_width=True)
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.markdown(
+                f"""<div style="background:#f8d7da;border-radius:8px;padding:12px 8px;text-align:center">
+                  <div style="font-size:11px;color:#842029;font-weight:600;text-transform:uppercase">Max Drawdown</div>
+                  <div style="font-size:24px;font-weight:700;color:#842029">{max_dd:.1f}%</div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+            c2.metric("Peak Date", viz_data.get("peak_date", "—"))
+            c3.metric("Trough Date", trough_date or "—")
+            if viz_data.get("currently_in_drawdown"):
+                c4.metric("Status", "In drawdown")
+                st.warning("Portfolio is currently still in a drawdown phase.")
+            else:
+                c4.metric("Recovery Date", viz_data.get("recovery_date") or "—")
+                st.success("Portfolio has fully recovered from the maximum drawdown.")
+
     elif viz_type == "pie_chart":
         tickers = viz_data.get("tickers", [])
         weights = viz_data.get("weights", [])

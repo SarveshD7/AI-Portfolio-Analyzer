@@ -9,7 +9,7 @@ from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 
 from tools.returns import calculate_portfolio_returns
-from tools.risk import calculate_sharpe_ratio
+from tools.risk import calculate_sharpe_ratio, calculate_max_drawdown
 
 load_dotenv()
 
@@ -42,6 +42,19 @@ def sharpe_ratio_tool(tickers: list, weights: list, period: str = "1y") -> dict:
     return calculate_sharpe_ratio(tickers, weights, period)
 
 
+@tool
+def max_drawdown_tool(tickers: list, weights: list, period: str = "1y") -> dict:
+    """Calculates maximum drawdown — the largest peak-to-trough decline in portfolio value.
+    Use when the user asks about worst loss, biggest drop, drawdown, or how bad things got.
+
+    Args:
+        tickers: List of stock ticker symbols (e.g. ['RELIANCE.NS', 'TCS.NS'])
+        weights: List of portfolio weights corresponding to each ticker (must sum to 1.0)
+        period: Time period — one of '1mo', '3mo', '6mo', '1y', '3y', '5y'
+    """
+    return calculate_max_drawdown(tickers, weights, period)
+
+
 # ---------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------
@@ -53,8 +66,8 @@ class AgentState(TypedDict):
     messages: list
     tool_results: dict
     needs_tool: bool
-    visualization_type: str   # "line_chart" | "metrics" | "pie_chart" | ""
-    tool_name: str            # "returns" | "sharpe" | ""
+    visualization_type: str   # "line_chart" | "metrics" | "pie_chart" | "drawdown_chart" | ""
+    tool_name: str            # "returns" | "sharpe" | "drawdown" | ""
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +94,7 @@ def analyze_question(state: AgentState) -> AgentState:
         f'Rules for tool_name + visualization_type:\n'
         f'  "return"/"performance"/"gain"/"loss"/"how did"/"trend"  → tool_name:"returns",  visualization_type:"line_chart"\n'
         f'  "sharpe"/"risk"/"volatility"/"risky"/"risk-adjusted"    → tool_name:"sharpe",   visualization_type:"metrics"\n'
+        f'  "drawdown"/"worst loss"/"biggest drop"/"max drop"      → tool_name:"drawdown", visualization_type:"drawdown_chart"\n'
         f'  "allocation"/"sector"/"breakdown"/"diversification"     → tool_name:"",         visualization_type:"pie_chart"\n'
         f'  unrelated question (needs_tool:false)                   → tool_name:"",         visualization_type:""\n'
         f'  default for any other portfolio question                 → tool_name:"returns",  visualization_type:"line_chart"'
@@ -120,6 +134,8 @@ def call_tool(state: AgentState) -> AgentState:
 
     if state.get("tool_name") == "sharpe":
         result = calculate_sharpe_ratio(tickers, weights, period)
+    elif state.get("tool_name") == "drawdown":
+        result = calculate_max_drawdown(tickers, weights, period)
     else:
         result = calculate_portfolio_returns(tickers, weights, period)
 
@@ -146,6 +162,19 @@ def generate_response(state: AgentState) -> AgentState:
             f"Portfolio allocation:\n{holdings}\n\n"
             f'Question: "{state["question"]}"\n\n'
             f"Write 2 conversational sentences describing this allocation."
+        )
+    elif viz_type == "drawdown_chart" and tool_results:
+        d = tool_results
+        status = "not yet recovered" if d.get("currently_in_drawdown") else f"recovered on {d.get('recovery_date')}"
+        prompt = (
+            f"You are a portfolio analysis assistant.\n\n"
+            f'Question: "{state["question"]}"\n\n'
+            f"Max drawdown analysis for {d['period']}:\n"
+            f"  Max Drawdown : {d['max_drawdown_pct']}%\n"
+            f"  Peak Date    : {d['peak_date']}\n"
+            f"  Trough Date  : {d['trough_date']}\n"
+            f"  Recovery     : {status}\n\n"
+            f"Write 2–3 sentences interpreting this drawdown for the user."
         )
     elif viz_type == "metrics" and tool_results:
         d = tool_results
@@ -239,8 +268,10 @@ def _build_visualization(viz_type: str, tool_results: dict, portfolio: dict) -> 
         }
 
     if viz_type == "metrics" and tool_results:
-        # calculate_sharpe_ratio already returns the exact fields the canvas needs
         return {"type": "metrics", "data": tool_results}
+
+    if viz_type == "drawdown_chart" and tool_results:
+        return {"type": "drawdown_chart", "data": tool_results}
 
     if viz_type == "pie_chart":
         return {
