@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Optional
 
 from dotenv import load_dotenv
 from langchain.tools import tool
@@ -192,9 +193,9 @@ def portfolio_composition_tool(tickers: list, weights: list) -> dict:
 def simulate_portfolio_change_tool(
     tickers: list,
     weights: list,
-    remove: list = None,
-    add: dict = None,
-    change_weight: dict = None,
+    remove: Optional[list] = None,
+    add: Optional[dict] = None,
+    change_weight: Optional[dict] = None,
 ) -> dict:
     """Simulate what-if portfolio changes and return the rebalanced portfolio.
 
@@ -271,6 +272,14 @@ _TOOL_VIZ_MAP = {
     "concentration_tool":         "concentration_pie",
     "correlation_tool":           "correlation_heatmap",
     "benchmark_tool":             "benchmark_chart",
+}
+
+# Large array fields that are only needed for visualization, not for the LLM's text response.
+# Stripping these from ToolMessages cuts token usage by ~2–5k tokens per call.
+_VIZ_ONLY_KEYS = {
+    "portfolio_returns_tool": ["daily_returns"],
+    "max_drawdown_tool":      ["drawdown_series"],
+    "benchmark_tool":         ["portfolio_cumulative", "benchmark_cumulative"],
 }
 
 # Maps called tool name → accumulated_analysis key for suggestions
@@ -407,8 +416,13 @@ def run_agent(
             raw = tool_fn.invoke(args)
             if isinstance(raw, dict):
                 tool_results = raw
+            # Strip visualization-only arrays before sending to LLM — saves 2–5k tokens
+            if isinstance(raw, dict) and name in _VIZ_ONLY_KEYS:
+                llm_raw = {k: v for k, v in raw.items() if k not in _VIZ_ONLY_KEYS[name]}
+            else:
+                llm_raw = raw
             messages.append(ToolMessage(
-                content=json.dumps(raw) if isinstance(raw, dict) else str(raw),
+                content=json.dumps(llm_raw) if isinstance(llm_raw, dict) else str(llm_raw),
                 tool_call_id=tc["id"],
             ))
 

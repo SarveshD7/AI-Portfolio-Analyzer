@@ -171,8 +171,8 @@ footer {{ display: none !important; }}
 
 /* Metrics */
 [data-testid="metric-container"] {{
-    background: {GRAY_BG} !important;
-    border: 1px solid {BORDER} !important;
+    background: rgba(255,255,255,0.08) !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
     border-radius: 10px !important;
     padding: 14px 16px !important;
 }}
@@ -181,15 +181,15 @@ footer {{ display: none !important; }}
     font-weight: 600 !important;
     text-transform: uppercase !important;
     letter-spacing: 0.05em !important;
-    color: {TEXT} !important;
+    color: rgba(255,255,255,0.65) !important;
 }}
 [data-testid="stMetricValue"] {{
     font-size: 22px !important;
     font-weight: 700 !important;
-    color: {TEXT} !important;
+    color: #ffffff !important;
 }}
 [data-testid="stMetricDelta"] {{
-    color: {MUTED} !important;
+    color: rgba(255,255,255,0.5) !important;
 }}
 
 /* Expander */
