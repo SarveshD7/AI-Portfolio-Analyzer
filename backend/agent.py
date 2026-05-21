@@ -10,8 +10,10 @@ from tools.benchmark import benchmark_portfolio
 from tools.concentration import analyze_concentration
 from tools.correlation import calculate_correlation
 from tools.portfolio_info import get_portfolio_composition
+from tools.portfolio_modification import modify_portfolio
 from tools.returns import calculate_portfolio_returns
 from tools.risk import calculate_sharpe_ratio, calculate_max_drawdown, calculate_var
+from tools.suggestions import generate_smart_suggestions
 
 load_dotenv()
 
@@ -21,13 +23,18 @@ load_dotenv()
 
 @tool
 def portfolio_returns_tool(tickers: list, weights: list, period: str = "1y") -> dict:
-    """Calculate historical portfolio returns over a time period.
+    """Calculate historical portfolio returns, performance, and per-stock contribution breakdown.
 
     Use when the user asks about:
     - How the portfolio performed / did
     - Returns, gains, losses, or profit
     - Performance over a specific period
     - "How much did I make / lose?"
+    - "Which stocks performed well or poorly?"
+    - "What is dragging down my portfolio?"
+    - "Which holdings are underperforming?"
+    - Individual stock contributions to portfolio performance
+    - Performance breakdown by holding
 
     Args:
         tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
@@ -163,18 +170,55 @@ def concentration_tool(tickers: list, weights: list, breakdown_type: str = "sect
 
 @tool
 def portfolio_composition_tool(tickers: list, weights: list) -> dict:
-    """Show portfolio composition with company names and allocation weights.
+    """Show portfolio composition with company names, allocation weights, and largest positions.
 
     Use when the user asks about:
     - What stocks are in the portfolio / what they own
     - Portfolio holdings or composition
     - Allocation or sector breakdown
+    - "Which stocks are my largest positions?"
+    - "What is dragging my portfolio down?" (position-level view)
+    - "How much of stock X do I hold?"
+    - Stock-level details, names, or weightings
 
     Args:
         tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
         weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
     """
     return get_portfolio_composition(tickers, weights)
+
+
+@tool
+def simulate_portfolio_change_tool(
+    tickers: list,
+    weights: list,
+    remove: list = None,
+    add: dict = None,
+    change_weight: dict = None,
+) -> dict:
+    """Simulate what-if portfolio changes and return the rebalanced portfolio.
+
+    Use when the user asks "what if" questions or wants to modify the portfolio:
+    - "What if I exit / remove / sell [stock]?"
+    - "What if I didn't have [stock] or [sector]?"
+    - "What if I added / bought [stock]?"
+    - "Replace X with Y"
+    - "Increase / decrease [stock] to X%"
+    - "Remove all my energy / tech / banking stocks"
+    - "What happens if I sell half my TCS?"
+    - "Should I swap Reliance for Gold?"
+
+    After calling this tool, tell the user what changed and what the new portfolio
+    looks like. All subsequent analysis will automatically use the modified portfolio.
+
+    Args:
+        tickers: Current portfolio tickers exactly as shown in the portfolio context
+        weights: Current portfolio weights (decimals summing to 1.0)
+        remove: Tickers to remove (e.g., ["RELIANCE.NS"])
+        add: Tickers to add with target weights (e.g., {"GOLD": 0.15})
+        change_weight: Tickers whose weights should change (e.g., {"TCS.NS": 0.40})
+    """
+    return modify_portfolio(tickers, weights, remove=remove, add=add, change_weight=change_weight)
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +234,7 @@ _tools = [
     concentration_tool,
     correlation_tool,
     benchmark_tool,
+    simulate_portfolio_change_tool,
 ]
 
 _tool_map = {t.name: t for t in _tools}
@@ -228,6 +273,22 @@ _TOOL_VIZ_MAP = {
     "benchmark_tool":             "benchmark_chart",
 }
 
+# Maps called tool name → accumulated_analysis key for suggestions
+_TOOL_DATA_KEY_MAP = {
+    "portfolio_returns_tool":     "returns_data",
+    "sharpe_ratio_tool":          "sharpe_data",
+    "max_drawdown_tool":          "drawdown_data",
+    "var_tool":                   "var_data",
+    "portfolio_composition_tool": "portfolio_composition",
+    # concentration_tool → "sector_breakdown" only when breakdown_type == "sector"
+}
+
+
+def _get_analysis_key(tool_name: str, tool_results: dict) -> str | None:
+    if tool_name == "concentration_tool":
+        return "sector_breakdown" if tool_results.get("breakdown_type") == "sector" else None
+    return _TOOL_DATA_KEY_MAP.get(tool_name)
+
 
 # ---------------------------------------------------------------------------
 # Visualization builder
@@ -241,6 +302,9 @@ def _build_visualization(viz_type: str, tool_results: dict, portfolio: dict) -> 
                 "daily_returns": tool_results.get("daily_returns", []),
                 "period": tool_results.get("period", ""),
                 "total_return_pct": tool_results.get("total_return_pct", 0),
+                "stock_contributions": tool_results.get("stock_contributions", []),
+                "best_performer": tool_results.get("best_performer", {}),
+                "worst_performer": tool_results.get("worst_performer", {}),
             },
         }
     if viz_type == "metrics" and tool_results:
@@ -262,16 +326,44 @@ def _build_visualization(viz_type: str, tool_results: dict, portfolio: dict) -> 
 # Public interface
 # ---------------------------------------------------------------------------
 
-def run_agent(portfolio: dict, question: str) -> dict:
+def run_agent(
+    portfolio: dict,
+    question: str,
+    accumulated_analysis: dict = None,
+    is_initial: bool = False,
+) -> dict:
     """Run the tool-calling agent using bind_tools.
 
     Args:
-        portfolio: {"tickers": [...], "weights": [...], "period": "1y"}
-        question:  Natural language question about the portfolio
+        portfolio:           {"tickers": [...], "weights": [...], "period": "1y"}
+        question:            Natural language question about the portfolio
+        accumulated_analysis: Prior tool results keyed by analysis type (for suggestions)
+        is_initial:          When True, runs composition + sector directly (no LLM) to seed
+                             the canvas and generate first-pass suggestions on upload.
 
     Returns:
-        {"response": str, "visualization": {"type": str, "data": dict}}
+        {"response": str, "visualization": dict, "suggestions": list, "analysis_updates": dict}
     """
+    if is_initial:
+        comp = get_portfolio_composition(portfolio["tickers"], portfolio["weights"])
+        sector = analyze_concentration(portfolio["tickers"], portfolio["weights"], "sector")
+        suggestions = generate_smart_suggestions(
+            portfolio_composition=comp,
+            sector_breakdown=sector,
+        )
+        return {
+            "response": "",
+            "visualization": _build_visualization("portfolio_pie", comp, portfolio),
+            "suggestions": suggestions,
+            "analysis_updates": {"portfolio_composition": comp, "sector_breakdown": sector},
+        }
+
+    _FALLBACK_RESPONSE = (
+        "I can help with portfolio analysis — including historical returns, risk metrics "
+        "(Sharpe ratio, VaR, max drawdown), sector concentration, asset correlation, and "
+        "benchmark comparisons. Could you rephrase your question with one of those in mind?"
+    )
+
     portfolio_context = "\n".join(
         f"  - {t}: {w * 100:.1f}%"
         for t, w in zip(portfolio["tickers"], portfolio["weights"])
@@ -288,13 +380,13 @@ def run_agent(portfolio: dict, question: str) -> dict:
         HumanMessage(content=formatted_input),
     ]
 
+    called_tool = None
+    tool_results = {}
+
     try:
         response = _llm_with_tools.invoke(messages)
     except Exception as e:
         raise RuntimeError(f"LLM call failed: {e}")
-
-    called_tool = None
-    tool_results = {}
 
     if getattr(response, "tool_calls", None):
         messages.append(response)
@@ -302,30 +394,74 @@ def run_agent(portfolio: dict, question: str) -> dict:
         for tc in response.tool_calls:
             name = tc["name"]
             args = tc["args"]
-            called_tool = name
 
             tool_fn = _tool_map.get(name)
-            if tool_fn:
-                raw = tool_fn.invoke(args)
-                if isinstance(raw, dict):
-                    tool_results = raw
+            if tool_fn is None:
+                # Unknown tool — stub a ToolMessage so the message sequence stays valid
                 messages.append(ToolMessage(
-                    content=json.dumps(raw) if isinstance(raw, dict) else str(raw),
+                    content=f"Tool '{name}' is not available.",
                     tool_call_id=tc["id"],
                 ))
+                continue
+            called_tool = name
+            raw = tool_fn.invoke(args)
+            if isinstance(raw, dict):
+                tool_results = raw
+            messages.append(ToolMessage(
+                content=json.dumps(raw) if isinstance(raw, dict) else str(raw),
+                tool_call_id=tc["id"],
+            ))
 
         try:
             final = _llm_with_tools.invoke(messages)
-            response_text = final.content
+            response_text = final.content or _FALLBACK_RESPONSE
         except Exception as e:
             raise RuntimeError(f"LLM follow-up call failed: {e}")
     else:
-        response_text = response.content
+        response_text = response.content or _FALLBACK_RESPONSE
 
-    viz_type = _TOOL_VIZ_MAP.get(called_tool, "")
-    visualization = _build_visualization(viz_type, tool_results, portfolio)
+    # Handle portfolio simulation — build a fresh pie chart and return the new portfolio
+    portfolio_update = None
+    if called_tool == "simulate_portfolio_change_tool" and tool_results:
+        new_tickers = tool_results["tickers"]
+        new_weights  = tool_results["weights"]
+        try:
+            comp = get_portfolio_composition(new_tickers, new_weights)
+            visualization = _build_visualization("portfolio_pie", comp, portfolio)
+        except Exception:
+            visualization = {"type": None, "data": {}}
+        portfolio_update = {
+            "tickers":         new_tickers,
+            "weights":         new_weights,
+            "period":          portfolio["period"],
+            "changes_summary": tool_results.get("changes_summary", ""),
+        }
+    else:
+        viz_type = _TOOL_VIZ_MAP.get(called_tool, "")
+        visualization = _build_visualization(viz_type, tool_results, portfolio)
+
+    # Build accumulated analysis: merge prior data with this call's result
+    all_analysis = dict(accumulated_analysis or {})
+    analysis_updates: dict = {}
+    if called_tool and called_tool != "simulate_portfolio_change_tool" and tool_results:
+        key = _get_analysis_key(called_tool, tool_results)
+        if key:
+            analysis_updates[key] = tool_results
+            all_analysis[key] = tool_results
+
+    suggestions = generate_smart_suggestions(
+        portfolio_composition=all_analysis.get("portfolio_composition"),
+        sector_breakdown=all_analysis.get("sector_breakdown"),
+        sharpe_data=all_analysis.get("sharpe_data"),
+        returns_data=all_analysis.get("returns_data"),
+        drawdown_data=all_analysis.get("drawdown_data"),
+        var_data=all_analysis.get("var_data"),
+    )
 
     return {
-        "response": response_text,
-        "visualization": visualization,
+        "response":         response_text,
+        "visualization":    visualization,
+        "suggestions":      suggestions,
+        "analysis_updates": analysis_updates,
+        "portfolio_update": portfolio_update,
     }

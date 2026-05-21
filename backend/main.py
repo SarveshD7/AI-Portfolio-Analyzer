@@ -2,7 +2,7 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent import run_agent
 
@@ -30,6 +30,8 @@ class AnalyzeRequest(BaseModel):
     weights: list[float]
     period: str = "1y"
     question: str = "How has my portfolio performed?"
+    accumulated_analysis: dict = Field(default_factory=dict)
+    is_initial: bool = False
 
 
 @app.post("/analyze")
@@ -49,7 +51,12 @@ def analyze(body: AnalyzeRequest):
     }
 
     try:
-        return run_agent(portfolio, body.question)
+        return run_agent(
+            portfolio,
+            body.question,
+            accumulated_analysis=body.accumulated_analysis,
+            is_initial=body.is_initial,
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
