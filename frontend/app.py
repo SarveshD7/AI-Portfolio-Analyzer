@@ -775,6 +775,79 @@ def render_canvas(viz_type: str, viz_data: dict):
             df.columns = ["Company", "Ticker", "Weight (%)"]
             st.dataframe(df, use_container_width=True, hide_index=True)
 
+    # ── Portfolio comparison ──────────────────────────────────────────────────
+    elif viz_type == "comparison_chart":
+        metrics          = viz_data.get("metrics", [])
+        holdings_changes = viz_data.get("holdings_changes", {})
+        period           = viz_data.get("period", "")
+
+        if metrics:
+            labels   = [m["label"] for m in metrics]
+            orig_vals = [m["original"] for m in metrics]
+            mod_vals  = [m["modified"]  for m in metrics]
+
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                name="Original",
+                x=labels, y=orig_vals,
+                marker_color=MUTED,
+                hovertemplate="<b>%{x}</b><br>Original: <b>%{y}</b><extra></extra>",
+            ))
+            fig.add_trace(go.Bar(
+                name="Modified",
+                x=labels, y=mod_vals,
+                marker_color=PRIMARY,
+                hovertemplate="<b>%{x}</b><br>Modified: <b>%{y}</b><extra></extra>",
+            ))
+            layout = _chart_layout("Original vs Modified Portfolio", period)
+            layout["barmode"] = "group"
+            layout["legend"]  = dict(
+                orientation="h", yanchor="bottom", y=1.02,
+                xanchor="right", x=1,
+                font=dict(size=11, family="Inter, sans-serif", color=TEXT),
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor=BORDER, borderwidth=1,
+            )
+            fig.update_layout(**layout)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Delta metric cards
+            cols = st.columns(len(metrics))
+            for col, m in zip(cols, metrics):
+                delta   = m["delta"]
+                unit    = m["unit"]
+                good    = (delta > 0) == m["higher_is_better"]
+                color   = SUCCESS if good else (DANGER if delta != 0 else MUTED)
+                bg      = SUCCESS_BG if good else (DANGER_BG if delta != 0 else GRAY_BG)
+                arrow   = "▲" if delta > 0 else ("▼" if delta < 0 else "—")
+                sign    = "+" if delta > 0 else ""
+                col.markdown(
+                    f"""<div style="background:{bg};border-radius:10px;padding:12px 10px;
+                      text-align:center;border:1px solid {BORDER}">
+                      <div style="font-size:10px;font-weight:600;text-transform:uppercase;
+                        letter-spacing:.05em;color:{MUTED};margin-bottom:4px">{m["label"]}</div>
+                      <div style="font-size:18px;font-weight:700;color:{color}">
+                        {arrow} {sign}{delta}{unit}
+                      </div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+
+            # Holdings changes
+            added   = holdings_changes.get("added", [])
+            removed = holdings_changes.get("removed", [])
+            reweighted = holdings_changes.get("weight_changes", [])
+            if added or removed or reweighted:
+                st.markdown("**Holdings changes**")
+                if added:
+                    st.success(f"Added: {', '.join(added)}")
+                if removed:
+                    st.error(f"Removed: {', '.join(removed)}")
+                if reweighted:
+                    rw_df = pd.DataFrame(reweighted)
+                    rw_df.columns = ["Ticker", "Original Weight (%)", "Modified Weight (%)", "Δ (%)"]
+                    st.dataframe(rw_df, use_container_width=True, hide_index=True)
+
     # ── Empty state ───────────────────────────────────────────────────────────
     else:
         st.markdown(
@@ -799,13 +872,16 @@ def render_canvas(viz_type: str, viz_data: dict):
 # ---------------------------------------------------------------------------
 def _call_api(portfolio: dict, prompt: str):
     """Call /analyze, update session state, return True on success."""
-    p = st.session_state.current_portfolio or portfolio
+    p    = st.session_state.current_portfolio or portfolio
+    orig = st.session_state.original_portfolio or portfolio
     payload = {
-        "tickers": p["tickers"],
-        "weights": p["weights"],
-        "period":  p["period"],
-        "question": prompt,
+        "tickers":           p["tickers"],
+        "weights":           p["weights"],
+        "period":            p["period"],
+        "question":          prompt,
         "accumulated_analysis": st.session_state.accumulated_analysis,
+        "original_tickers":  orig["tickers"],
+        "original_weights":  orig["weights"],
     }
     try:
         resp = requests.post("http://localhost:8000/analyze", json=payload, timeout=120)

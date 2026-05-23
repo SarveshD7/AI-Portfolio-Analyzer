@@ -1,15 +1,16 @@
 import json
 import os
-from typing import Optional
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 from langchain.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 from tools.benchmark import benchmark_portfolio
 from tools.concentration import analyze_concentration
 from tools.correlation import calculate_correlation
+from tools.portfolio_comparison import compare_portfolios
 from tools.portfolio_info import get_portfolio_composition
 from tools.portfolio_modification import modify_portfolio
 from tools.returns import calculate_portfolio_returns
@@ -23,7 +24,7 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 @tool
-def portfolio_returns_tool(tickers: list, weights: list, period: str = "1y") -> dict:
+def portfolio_returns_tool(tickers: List[str], weights: List[float], period: str = "1y") -> dict:
     """Calculate historical portfolio returns, performance, and per-stock contribution breakdown.
 
     Use when the user asks about:
@@ -46,7 +47,7 @@ def portfolio_returns_tool(tickers: list, weights: list, period: str = "1y") -> 
 
 
 @tool
-def sharpe_ratio_tool(tickers: list, weights: list, period: str = "1y") -> dict:
+def sharpe_ratio_tool(tickers: List[str], weights: List[float], period: str = "1y") -> dict:
     """Calculate Sharpe ratio and risk-adjusted return metrics.
 
     Use when the user asks about:
@@ -63,7 +64,7 @@ def sharpe_ratio_tool(tickers: list, weights: list, period: str = "1y") -> dict:
 
 
 @tool
-def max_drawdown_tool(tickers: list, weights: list, period: str = "1y") -> dict:
+def max_drawdown_tool(tickers: List[str], weights: List[float], period: str = "1y") -> dict:
     """Calculate maximum drawdown — the worst peak-to-trough decline.
 
     Use when the user asks about:
@@ -80,7 +81,7 @@ def max_drawdown_tool(tickers: list, weights: list, period: str = "1y") -> dict:
 
 
 @tool
-def var_tool(tickers: list, weights: list, period: str = "1y") -> dict:
+def var_tool(tickers: List[str], weights: List[float], period: str = "1y") -> dict:
     """Calculate Value at Risk (VaR) and tail risk metrics.
 
     Use when the user asks about:
@@ -99,8 +100,8 @@ def var_tool(tickers: list, weights: list, period: str = "1y") -> dict:
 
 @tool
 def benchmark_tool(
-    tickers: list,
-    weights: list,
+    tickers: List[str],
+    weights: List[float],
     period: str = "1y",
     benchmark: str = "^NSEI",
 ) -> dict:
@@ -129,7 +130,7 @@ def benchmark_tool(
 
 
 @tool
-def correlation_tool(tickers: list, weights: list, period: str = "1y") -> dict:
+def correlation_tool(tickers: List[str], weights: List[float], period: str = "1y") -> dict:
     """Compute pairwise correlation between all assets in the portfolio.
 
     Use when the user asks about:
@@ -149,7 +150,7 @@ def correlation_tool(tickers: list, weights: list, period: str = "1y") -> dict:
 
 
 @tool
-def concentration_tool(tickers: list, weights: list, breakdown_type: str = "sector") -> dict:
+def concentration_tool(tickers: List[str], weights: List[float], breakdown_type: str = "sector") -> dict:
     """Analyze portfolio concentration by sector, asset class, or market-cap factor.
 
     Use when the user asks about:
@@ -170,7 +171,7 @@ def concentration_tool(tickers: list, weights: list, breakdown_type: str = "sect
 
 
 @tool
-def portfolio_composition_tool(tickers: list, weights: list) -> dict:
+def portfolio_composition_tool(tickers: List[str], weights: List[float]) -> dict:
     """Show portfolio composition with company names, allocation weights, and largest positions.
 
     Use when the user asks about:
@@ -191,11 +192,11 @@ def portfolio_composition_tool(tickers: list, weights: list) -> dict:
 
 @tool
 def simulate_portfolio_change_tool(
-    tickers: list,
-    weights: list,
-    remove: Optional[list] = None,
-    add: Optional[dict] = None,
-    change_weight: Optional[dict] = None,
+    tickers: List[str],
+    weights: List[float],
+    remove: Optional[List[str]] = None,
+    add: Optional[Dict[str, float]] = None,
+    change_weight: Optional[Dict[str, float]] = None,
 ) -> dict:
     """Simulate what-if portfolio changes and return the rebalanced portfolio.
 
@@ -216,10 +217,48 @@ def simulate_portfolio_change_tool(
         tickers: Current portfolio tickers exactly as shown in the portfolio context
         weights: Current portfolio weights (decimals summing to 1.0)
         remove: Tickers to remove (e.g., ["RELIANCE.NS"])
-        add: Tickers to add with target weights (e.g., {"GOLD": 0.15})
-        change_weight: Tickers whose weights should change (e.g., {"TCS.NS": 0.40})
+        add: Dict of {ticker: weight} for NEW stocks being added — NOT a list.
+             The weight belongs here, not in change_weight.
+             e.g. {"SBIN.NS": 0.20} adds SBI at 20%, {"AAPL": 0.10, "MSFT": 0.05} for US stocks.
+             MUST use the correct yfinance ticker with exchange suffix — infer from existing tickers:
+             Indian NSE (.NS): "INFY.NS", "HDFCBANK.NS"  |  US (no suffix): "AAPL", "NVDA"
+        change_weight: Dict of {ticker: weight} only for stocks ALREADY in the portfolio
+                       whose weight needs adjusting (e.g., {"TCS.NS": 0.40})
     """
     return modify_portfolio(tickers, weights, remove=remove, add=add, change_weight=change_weight)
+
+
+@tool
+def compare_portfolios_tool(
+    original_tickers: List[str],
+    original_weights: List[float],
+    modified_tickers: List[str],
+    modified_weights: List[float],
+    period: str = "1y",
+) -> dict:
+    """Compare the original portfolio against the current (modified) portfolio across key metrics.
+
+    Use when the user asks about:
+    - How the modified portfolio compares to the original
+    - "Is my new portfolio better than the old one?"
+    - "What changed after the modification?"
+    - "Compare original vs current portfolio"
+    - "Did removing / adding [stock] improve my portfolio?"
+    - "Show me the impact of my changes"
+    - "How does the what-if portfolio stack up against what I had before?"
+
+    Args:
+        original_tickers: Tickers of the ORIGINAL (unmodified) portfolio
+        original_weights: Weights of the ORIGINAL portfolio (decimals summing to 1.0)
+        modified_tickers: Tickers of the CURRENT (modified) portfolio
+        modified_weights: Weights of the CURRENT portfolio (decimals summing to 1.0)
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
+    """
+    return compare_portfolios(
+        original_tickers, original_weights,
+        modified_tickers, modified_weights,
+        period,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -236,11 +275,16 @@ _tools = [
     correlation_tool,
     benchmark_tool,
     simulate_portfolio_change_tool,
+    compare_portfolios_tool,
 ]
 
 _tool_map = {t.name: t for t in _tools}
 
-_llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
+_llm = ChatOpenAI(
+    model="meta-llama/llama-3.3-70b-instruct",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+    base_url="https://openrouter.ai/api/v1",
+)
 _llm_with_tools = _llm.bind_tools(_tools)
 
 _SYSTEM_PROMPT = """You are a portfolio analysis assistant.
@@ -257,6 +301,16 @@ Period mapping (extract from the question; default to "1y" if unspecified):
   "3 years"                                        → "3y"
   "5 years"                                        → "5y"
 
+Ticker format rules — critical when adding new stocks:
+- Look at the existing portfolio tickers to determine the exchange:
+    Tickers ending in ".NS"  → Indian NSE. New additions MUST also use ".NS"
+      e.g. "Infosys" → "INFY.NS", "HDFC Bank" → "HDFCBANK.NS", "Gold ETF" → "GOLDBEES.NS"
+    Tickers ending in ".BO"  → Indian BSE. New additions MUST also use ".BO"
+    No suffix                → US market. New additions have no suffix
+      e.g. "Apple" → "AAPL", "Microsoft" → "MSFT", "Nvidia" → "NVDA"
+- NEVER pass a plain company name ("Infosys", "Apple") as a ticker — always use the
+  official yfinance symbol. If unsure, use the most widely recognised symbol for that exchange.
+
 After calling a tool, respond conversationally in 2–3 sentences:
 - Explain the results in plain English
 - Embed the specific numbers from the tool result
@@ -272,6 +326,7 @@ _TOOL_VIZ_MAP = {
     "concentration_tool":         "concentration_pie",
     "correlation_tool":           "correlation_heatmap",
     "benchmark_tool":             "benchmark_chart",
+    "compare_portfolios_tool":    "comparison_chart",
 }
 
 # Large array fields that are only needed for visualization, not for the LLM's text response.
@@ -340,6 +395,7 @@ def run_agent(
     question: str,
     accumulated_analysis: dict = None,
     is_initial: bool = False,
+    original_portfolio: dict = None,
 ) -> dict:
     """Run the tool-calling agent using bind_tools.
 
@@ -377,10 +433,24 @@ def run_agent(
         f"  - {t}: {w * 100:.1f}%"
         for t, w in zip(portfolio["tickers"], portfolio["weights"])
     )
+    orig = original_portfolio
+    if orig and (orig["tickers"] != portfolio["tickers"] or orig["weights"] != portfolio["weights"]):
+        orig_context = "\n".join(
+            f"  - {t}: {w * 100:.1f}%"
+            for t, w in zip(orig["tickers"], orig["weights"])
+        )
+        original_section = (
+            f"\nOriginal portfolio (before modifications):\n{orig_context}\n"
+            f"Original Tickers: {orig['tickers']}\n"
+            f"Original Weights: {orig['weights']}\n"
+        )
+    else:
+        original_section = ""
     formatted_input = (
-        f"Portfolio holdings:\n{portfolio_context}\n\n"
+        f"Current portfolio holdings:\n{portfolio_context}\n\n"
         f"Tickers: {portfolio['tickers']}\n"
-        f"Weights: {portfolio['weights']}\n\n"
+        f"Weights: {portfolio['weights']}\n"
+        f"{original_section}\n"
         f"Question: {question}"
     )
 
@@ -427,7 +497,7 @@ def run_agent(
             ))
 
         try:
-            final = _llm_with_tools.invoke(messages)
+            final = _llm.invoke(messages)
             response_text = final.content or _FALLBACK_RESPONSE
         except Exception as e:
             raise RuntimeError(f"LLM follow-up call failed: {e}")

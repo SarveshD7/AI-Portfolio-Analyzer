@@ -32,6 +32,8 @@ class AnalyzeRequest(BaseModel):
     question: str = "How has my portfolio performed?"
     accumulated_analysis: dict = Field(default_factory=dict)
     is_initial: bool = False
+    original_tickers: list[str] = Field(default_factory=list)
+    original_weights: list[float] = Field(default_factory=list)
 
 
 @app.post("/analyze")
@@ -50,12 +52,21 @@ def analyze(body: AnalyzeRequest):
         "period": body.period,
     }
 
+    original_portfolio = None
+    if body.original_tickers and body.original_weights:
+        original_portfolio = {
+            "tickers": body.original_tickers,
+            "weights": body.original_weights,
+            "period":  body.period,
+        }
+
     try:
         return run_agent(
             portfolio,
             body.question,
             accumulated_analysis=body.accumulated_analysis,
             is_initial=body.is_initial,
+            original_portfolio=original_portfolio,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
