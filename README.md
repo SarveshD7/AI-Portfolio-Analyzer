@@ -1,5 +1,3 @@
-<img width="1917" height="971" alt="image" src="https://github.com/user-attachments/assets/47d5d994-56bd-4edb-8a1f-c7d6d7b6eb1c" /># Kalpi — AI Portfolio Analyzer
-
 > Institutional-grade portfolio analysis through natural language conversation.
 
 Kalpi is an AI-powered investment analysis tool that lets you interrogate your portfolio in plain English. Ask about returns, drawdowns, correlations, sector exposure, or stress-test against historical crises — all through a chat interface backed by deterministic financial calculations and dynamic visualizations.
@@ -7,8 +5,7 @@ Kalpi is an AI-powered investment analysis tool that lets you interrogate your p
 ---
 
 ## Demo
-| **Complete Demo Video** | 
-| https://www.loom.com/share/7b5582b943ae483981c24ab03fa638f1 | 
+[Complete Demo Video][https://www.loom.com/share/7b5582b943ae483981c24ab03fa638f1]
 | Feature Screenshots |
 |:---:|
 | **Chat + Canvas Interface** |
