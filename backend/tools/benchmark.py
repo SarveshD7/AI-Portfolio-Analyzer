@@ -39,16 +39,21 @@ def benchmark_portfolio(
     weights: list,
     period: str = "1y",
     benchmark: str = "^NSEI",
+    start_date: str = None,
+    end_date: str = None,
 ) -> dict:
     """Compare portfolio returns against a market index."""
-    if period not in VALID_PERIODS:
+    period = period or "1y"
+    dl_kwargs = {"start": start_date, "end": end_date} if (start_date and end_date) else {"period": period}
+    if not (start_date and end_date) and period not in VALID_PERIODS:
         raise ValueError(f"Invalid period '{period}'. Must be one of {sorted(VALID_PERIODS)}.")
+    period_label = f"{start_date} → {end_date}" if (start_date and end_date) else period
 
     bm_ticker = _ALIASES.get(benchmark.lower().strip(), benchmark)
     bm_name   = _NAMES.get(bm_ticker, bm_ticker)
 
     try:
-        raw = yf.download(tickers + [bm_ticker], period=period, auto_adjust=True, progress=False)
+        raw = yf.download(tickers + [bm_ticker], auto_adjust=True, progress=False, **dl_kwargs)
     except Exception as e:
         raise RuntimeError(f"Failed to fetch data from yfinance: {e}")
 
@@ -104,5 +109,5 @@ def benchmark_portfolio(
         "alpha_pct":                  round(alpha, 2),
         "beta":                       round(beta, 4),
         "outperformed":               port_total > bm_total,
-        "period":                     period,
+        "period":                     period_label,
     }

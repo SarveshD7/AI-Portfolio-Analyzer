@@ -14,7 +14,7 @@ from tools.portfolio_comparison import compare_portfolios
 from tools.portfolio_info import get_portfolio_composition
 from tools.portfolio_modification import modify_portfolio
 from tools.returns import calculate_portfolio_returns
-from tools.risk import calculate_sharpe_ratio, calculate_max_drawdown, calculate_var
+from tools.risk import calculate_sharpe_ratio, calculate_max_drawdown, calculate_var, calculate_beta, calculate_rolling_metrics
 from tools.suggestions import generate_smart_suggestions
 
 load_dotenv()
@@ -24,13 +24,19 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 @tool
-def portfolio_returns_tool(tickers: List[str], weights: List[float], period: str = "1y") -> dict:
+def portfolio_returns_tool(
+    tickers: List[str],
+    weights: List[float],
+    period: Optional[str] = "1y",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict:
     """Calculate historical portfolio returns, performance, and per-stock contribution breakdown.
 
     Use when the user asks about:
     - How the portfolio performed / did
     - Returns, gains, losses, or profit
-    - Performance over a specific period
+    - Performance over a specific period or date range
     - "How much did I make / lose?"
     - "Which stocks performed well or poorly?"
     - "What is dragging down my portfolio?"
@@ -41,13 +47,21 @@ def portfolio_returns_tool(tickers: List[str], weights: List[float], period: str
     Args:
         tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
         weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
-        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y" — used when no date range given
+        start_date: Start date in YYYY-MM-DD format (overrides period when paired with end_date)
+        end_date: End date in YYYY-MM-DD format (overrides period when paired with start_date)
     """
-    return calculate_portfolio_returns(tickers, weights, period)
+    return calculate_portfolio_returns(tickers, weights, period, start_date, end_date)
 
 
 @tool
-def sharpe_ratio_tool(tickers: List[str], weights: List[float], period: str = "1y") -> dict:
+def sharpe_ratio_tool(
+    tickers: List[str],
+    weights: List[float],
+    period: Optional[str] = "1y",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict:
     """Calculate Sharpe ratio and risk-adjusted return metrics.
 
     Use when the user asks about:
@@ -58,13 +72,21 @@ def sharpe_ratio_tool(tickers: List[str], weights: List[float], period: str = "1
     Args:
         tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
         weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
-        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y" — used when no date range given
+        start_date: Start date in YYYY-MM-DD format (overrides period when paired with end_date)
+        end_date: End date in YYYY-MM-DD format (overrides period when paired with start_date)
     """
-    return calculate_sharpe_ratio(tickers, weights, period)
+    return calculate_sharpe_ratio(tickers, weights, period, start_date=start_date, end_date=end_date)
 
 
 @tool
-def max_drawdown_tool(tickers: List[str], weights: List[float], period: str = "1y") -> dict:
+def max_drawdown_tool(
+    tickers: List[str],
+    weights: List[float],
+    period: Optional[str] = "1y",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict:
     """Calculate maximum drawdown — the worst peak-to-trough decline.
 
     Use when the user asks about:
@@ -75,13 +97,21 @@ def max_drawdown_tool(tickers: List[str], weights: List[float], period: str = "1
     Args:
         tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
         weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
-        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y" — used when no date range given
+        start_date: Start date in YYYY-MM-DD format (overrides period when paired with end_date)
+        end_date: End date in YYYY-MM-DD format (overrides period when paired with start_date)
     """
-    return calculate_max_drawdown(tickers, weights, period)
+    return calculate_max_drawdown(tickers, weights, period, start_date=start_date, end_date=end_date)
 
 
 @tool
-def var_tool(tickers: List[str], weights: List[float], period: str = "1y") -> dict:
+def var_tool(
+    tickers: List[str],
+    weights: List[float],
+    period: Optional[str] = "1y",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict:
     """Calculate Value at Risk (VaR) and tail risk metrics.
 
     Use when the user asks about:
@@ -93,17 +123,90 @@ def var_tool(tickers: List[str], weights: List[float], period: str = "1y") -> di
     Args:
         tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
         weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
-        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y" — used when no date range given
+        start_date: Start date in YYYY-MM-DD format (overrides period when paired with end_date)
+        end_date: End date in YYYY-MM-DD format (overrides period when paired with start_date)
     """
-    return calculate_var(tickers, weights, period)
+    return calculate_var(tickers, weights, period, start_date=start_date, end_date=end_date)
+
+
+@tool
+def beta_tool(
+    tickers: List[str],
+    weights: List[float],
+    period: Optional[str] = "1y",
+    benchmark: str = "^NSEI",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict:
+    """Calculate portfolio beta, alpha, and market sensitivity relative to a benchmark.
+
+    Use when the user asks about:
+    - Beta or market sensitivity / systematic risk
+    - How much the portfolio moves with the market
+    - Alpha — excess return over the benchmark after adjusting for risk
+    - "Is my portfolio aggressive or defensive?"
+    - "How correlated is my portfolio to the Nifty / S&P 500?"
+    - R-squared or how much of returns are explained by the market
+
+    Beta interpretation:
+        beta > 1  → more volatile than the market (aggressive)
+        beta = 1  → moves in line with the market
+        beta < 1  → less volatile than the market (defensive)
+        beta < 0  → moves opposite to the market (hedge)
+
+    Args:
+        tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
+        weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y" — used when no date range given
+        benchmark: Index ticker or alias. Common values:
+            "^NSEI"    / "nifty50"   → Nifty 50  (default)
+            "^BSESN"   / "sensex"    → BSE Sensex
+            "^GSPC"    / "sp500"     → S&P 500
+            "^IXIC"    / "nasdaq"    → NASDAQ Composite
+            "^DJI"     / "dow"       → Dow Jones
+        start_date: Start date in YYYY-MM-DD format (overrides period when paired with end_date)
+        end_date: End date in YYYY-MM-DD format (overrides period when paired with start_date)
+    """
+    return calculate_beta(tickers, weights, period, benchmark, start_date=start_date, end_date=end_date)
+
+
+@tool
+def rolling_metrics_tool(
+    tickers: List[str],
+    weights: List[float],
+    period: Optional[str] = "1y",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict:
+    """Compute rolling risk metrics over time to show how portfolio risk has evolved.
+
+    Use when the user asks about:
+    - "Has my portfolio gotten riskier / safer over time?"
+    - Rolling risk, rolling volatility, rolling Sharpe ratio
+    - "How has risk changed over [period]?"
+    - "Is my portfolio more volatile now than before?"
+    - "Show me the risk trend over the past year"
+    - "Has volatility increased recently?"
+
+    Args:
+        tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
+        weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y" — used when no date range given
+        start_date: Start date in YYYY-MM-DD format (overrides period when paired with end_date)
+        end_date: End date in YYYY-MM-DD format (overrides period when paired with start_date)
+    """
+    return calculate_rolling_metrics(tickers, weights, period, start_date, end_date)
 
 
 @tool
 def benchmark_tool(
     tickers: List[str],
     weights: List[float],
-    period: str = "1y",
+    period: Optional[str] = "1y",
     benchmark: str = "^NSEI",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> dict:
     """Compare portfolio performance against a market index benchmark.
 
@@ -117,7 +220,7 @@ def benchmark_tool(
     Args:
         tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
         weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
-        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y" — used when no date range given
         benchmark: Index ticker or alias. Common values:
             "^NSEI"    / "nifty50"   → Nifty 50  (default)
             "^BSESN"   / "sensex"    → BSE Sensex
@@ -125,12 +228,20 @@ def benchmark_tool(
             "^IXIC"    / "nasdaq"    → NASDAQ Composite
             "^DJI"     / "dow"       → Dow Jones
             "^NSEBANK" / "niftybank" → Nifty Bank
+        start_date: Start date in YYYY-MM-DD format (overrides period when paired with end_date)
+        end_date: End date in YYYY-MM-DD format (overrides period when paired with start_date)
     """
-    return benchmark_portfolio(tickers, weights, period, benchmark)
+    return benchmark_portfolio(tickers, weights, period, benchmark, start_date, end_date)
 
 
 @tool
-def correlation_tool(tickers: List[str], weights: List[float], period: str = "1y") -> dict:
+def correlation_tool(
+    tickers: List[str],
+    weights: List[float],
+    period: Optional[str] = "1y",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict:
     """Compute pairwise correlation between all assets in the portfolio.
 
     Use when the user asks about:
@@ -144,9 +255,11 @@ def correlation_tool(tickers: List[str], weights: List[float], period: str = "1y
     Args:
         tickers: List of stock tickers (e.g. ["RELIANCE.NS", "TCS.NS"])
         weights: Corresponding weights as decimals summing to 1.0 (e.g. [0.6, 0.4])
-        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y" — used when no date range given
+        start_date: Start date in YYYY-MM-DD format (overrides period when paired with end_date)
+        end_date: End date in YYYY-MM-DD format (overrides period when paired with start_date)
     """
-    return calculate_correlation(tickers, weights, period)
+    return calculate_correlation(tickers, weights, period, start_date, end_date)
 
 
 @tool
@@ -194,9 +307,7 @@ def portfolio_composition_tool(tickers: List[str], weights: List[float]) -> dict
 def simulate_portfolio_change_tool(
     tickers: List[str],
     weights: List[float],
-    remove: Optional[List[str]] = None,
-    add: Optional[Dict[str, float]] = None,
-    change_weight: Optional[Dict[str, float]] = None,
+    modifications: Dict[str, float],
 ) -> dict:
     """Simulate what-if portfolio changes and return the rebalanced portfolio.
 
@@ -207,8 +318,10 @@ def simulate_portfolio_change_tool(
     - "Replace X with Y"
     - "Increase / decrease [stock] to X%"
     - "Remove all my energy / tech / banking stocks"
-    - "What happens if I sell half my TCS?"
-    - "Should I swap Reliance for Gold?"
+    - Compound: "Remove TCS, add INFY at 15%, and increase HDFC to 30%"
+
+    Always encode ALL changes in a single call using the modifications dict.
+    Never make multiple separate tool calls for one compound request.
 
     After calling this tool, tell the user what changed and what the new portfolio
     looks like. All subsequent analysis will automatically use the modified portfolio.
@@ -216,16 +329,33 @@ def simulate_portfolio_change_tool(
     Args:
         tickers: Current portfolio tickers exactly as shown in the portfolio context
         weights: Current portfolio weights (decimals summing to 1.0)
-        remove: Tickers to remove (e.g., ["RELIANCE.NS"])
-        add: Dict of {ticker: weight} for NEW stocks being added — NOT a list.
-             The weight belongs here, not in change_weight.
-             e.g. {"SBIN.NS": 0.20} adds SBI at 20%, {"AAPL": 0.10, "MSFT": 0.05} for US stocks.
-             MUST use the correct yfinance ticker with exchange suffix — infer from existing tickers:
-             Indian NSE (.NS): "INFY.NS", "HDFCBANK.NS"  |  US (no suffix): "AAPL", "NVDA"
-        change_weight: Dict of {ticker: weight} only for stocks ALREADY in the portfolio
-                       whose weight needs adjusting (e.g., {"TCS.NS": 0.40})
+        modifications: Dict of {ticker: weight} encoding ALL changes at once.
+            weight = 0.0  → remove ticker completely
+            weight > 0    → update weight if already held, add if new stock
+            Example: {"RELIANCE.NS": 0.0, "TCS.NS": 0.35, "INFY.NS": 0.15}
+            MUST use correct yfinance ticker with exchange suffix:
+            Indian NSE (.NS): "INFY.NS", "HDFCBANK.NS"  |  US (no suffix): "AAPL", "NVDA"
     """
-    return modify_portfolio(tickers, weights, remove=remove, add=add, change_weight=change_weight)
+    return modify_portfolio(tickers, weights, modifications)
+
+
+@tool
+def revert_to_original_portfolio_tool(confirm: bool = True) -> dict:
+    """Revert the portfolio back to its original state, undoing all what-if modifications.
+
+    Use when the user asks to:
+    - Revert / undo / reset the portfolio
+    - Go back to the original / previous portfolio
+    - Restore the original holdings
+    - Undo all changes
+    - "Start fresh" or "cancel modifications"
+    - "Use my original portfolio"
+    - "Let's go back" / "take me back to original"
+
+    Args:
+        confirm: Always pass True.
+    """
+    return {"status": "reverted"}
 
 
 @tool
@@ -234,7 +364,9 @@ def compare_portfolios_tool(
     original_weights: List[float],
     modified_tickers: List[str],
     modified_weights: List[float],
-    period: str = "1y",
+    period: Optional[str] = "1y",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> dict:
     """Compare the original portfolio against the current (modified) portfolio across key metrics.
 
@@ -252,12 +384,14 @@ def compare_portfolios_tool(
         original_weights: Weights of the ORIGINAL portfolio (decimals summing to 1.0)
         modified_tickers: Tickers of the CURRENT (modified) portfolio
         modified_weights: Weights of the CURRENT portfolio (decimals summing to 1.0)
-        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y"
+        period: "1mo", "3mo", "6mo", "1y", "3y", or "5y" — used when no date range given
+        start_date: Start date in YYYY-MM-DD format (overrides period when paired with end_date)
+        end_date: End date in YYYY-MM-DD format (overrides period when paired with start_date)
     """
     return compare_portfolios(
         original_tickers, original_weights,
         modified_tickers, modified_weights,
-        period,
+        period, start_date, end_date,
     )
 
 
@@ -270,11 +404,14 @@ _tools = [
     sharpe_ratio_tool,
     max_drawdown_tool,
     var_tool,
+    beta_tool,
+    rolling_metrics_tool,
     portfolio_composition_tool,
     concentration_tool,
     correlation_tool,
     benchmark_tool,
     simulate_portfolio_change_tool,
+    revert_to_original_portfolio_tool,
     compare_portfolios_tool,
 ]
 
@@ -293,13 +430,31 @@ Use the available tools to answer questions about the user's portfolio.
 The portfolio's tickers and weights are in the human message — always pass
 those exact values when calling tools.
 
-Period mapping (extract from the question; default to "1y" if unspecified):
-  "1 month" / "30 days"                          → "1mo"
-  "3 months" / "quarter"                          → "3mo"
-  "6 months" / "half year"                        → "6mo"
-  "1 year" / "last year" / "past year" / "yearly" → "1y"
-  "3 years"                                        → "3y"
-  "5 years"                                        → "5y"
+Period mapping — use period= when the user says a relative window (default "1y"):
+  "1 month" / "30 days"                          → period="1mo"
+  "3 months" / "quarter"                          → period="3mo"
+  "6 months" / "half year"                        → period="6mo"
+  "1 year" / "last year" / "past year" / "yearly" → period="1y"
+  "3 years"                                        → period="3y"
+  "5 years"                                        → period="5y"
+
+Date range mapping — use start_date= and end_date= (YYYY-MM-DD) for anything specific.
+Today is 2026-05-24. Always prefer dates over period when the user names a window.
+  "YTD" / "year to date" / "this year"           → start="2026-01-01"  end="2026-05-24"
+  "Q1" / "first quarter" (current year)          → start="2026-01-01"  end="2026-03-31"
+  "Q2" / "second quarter" (current year)         → start="2026-04-01"  end="2026-06-30"
+  "Q3" / "third quarter" (current year)          → start="2026-07-01"  end="2026-09-30"
+  "Q4" / "fourth quarter" (current year)         → start="2026-10-01"  end="2026-12-31"
+  "Jan to June" / "Jan–June"                     → start="<year>-01-01" end="<year>-06-30"
+  "from March to August"                         → start="<year>-03-01" end="<year>-08-31"
+  "in 2023" / "full year 2023"                   → start="2023-01-01"  end="2023-12-31"
+  "last quarter" (before Q2 2026)                → start="2026-01-01"  end="2026-03-31"
+  "last month" (before May 2026)                 → start="2026-04-01"  end="2026-04-30"
+  "COVID crash"                                   → start="2020-02-19"  end="2020-03-23"
+  "COVID recovery"                               → start="2020-03-23"  end="2020-12-31"
+  "2008 crisis" / "GFC" / "financial crisis"     → start="2008-09-01"  end="2009-03-31"
+  "dot-com crash"                                → start="2000-03-01"  end="2002-10-09"
+  If the user names a month without a year, assume the most recent occurrence of that month.
 
 Ticker format rules — critical when adding new stocks:
 - Look at the existing portfolio tickers to determine the exchange:
@@ -310,11 +465,24 @@ Ticker format rules — critical when adding new stocks:
       e.g. "Apple" → "AAPL", "Microsoft" → "MSFT", "Nvidia" → "NVDA"
 - NEVER pass a plain company name ("Infosys", "Apple") as a ticker — always use the
   official yfinance symbol. If unsure, use the most widely recognised symbol for that exchange.
+- CRITICAL — explicit ticker symbols vs company names:
+    If the user provides something that already looks like a ticker (all-caps word, e.g. TMPV,
+    INFY, HDFCBANK), only append the exchange suffix if it is missing. NEVER substitute it
+    with a different company's ticker. TMPV → TMPV.NS (Indian portfolio), NOT TATAMOTORS.NS.
+    Only look up and substitute a ticker when the user provides a plain company name in
+    natural language (e.g. "Tata Motors", "Infosys", "Apple").
+
+Revert intent — call revert_to_original_portfolio_tool whenever the user says anything like:
+  "go back to original", "revert", "undo", "reset", "restore original", "original portfolio",
+  "cancel changes", "start fresh", "take me back". Always pass confirm=True.
 
 After calling a tool, respond conversationally in 2–3 sentences:
 - Explain the results in plain English
 - Embed the specific numbers from the tool result
-- Provide brief context or interpretation"""
+- Provide brief context or interpretation
+- For simulate_portfolio_change_tool: base your response entirely on the `changes_summary`
+  field. Do not add doubts or caveats about ticker validity — the tool already validated each
+  ticker. If `invalid_tickers` is empty, report all changes as successful without qualification."""
 
 # Maps called tool name → canvas visualization type
 _TOOL_VIZ_MAP = {
@@ -322,6 +490,8 @@ _TOOL_VIZ_MAP = {
     "sharpe_ratio_tool":          "metrics",
     "var_tool":                   "metrics",
     "max_drawdown_tool":          "drawdown_chart",
+    "beta_tool":                  "metrics",
+    "rolling_metrics_tool":       "rolling_metrics_chart",
     "portfolio_composition_tool": "portfolio_pie",
     "concentration_tool":         "concentration_pie",
     "correlation_tool":           "correlation_heatmap",
@@ -335,6 +505,7 @@ _VIZ_ONLY_KEYS = {
     "portfolio_returns_tool": ["daily_returns"],
     "max_drawdown_tool":      ["drawdown_series"],
     "benchmark_tool":         ["portfolio_cumulative", "benchmark_cumulative"],
+    "rolling_metrics_tool":   ["rolling_volatility", "rolling_sharpe", "rolling_var_95"],
 }
 
 # Maps called tool name → accumulated_analysis key for suggestions
@@ -383,6 +554,10 @@ def _build_visualization(viz_type: str, tool_results: dict, portfolio: dict) -> 
         return {"type": "correlation_heatmap", "data": tool_results}
     if viz_type == "benchmark_chart" and tool_results:
         return {"type": "benchmark_chart", "data": tool_results}
+    if viz_type == "comparison_chart" and tool_results:
+        return {"type": "comparison_chart", "data": tool_results}
+    if viz_type == "rolling_metrics_chart" and tool_results:
+        return {"type": "rolling_metrics_chart", "data": tool_results}
     return {"type": None, "data": {}}
 
 
@@ -506,12 +681,14 @@ def run_agent(
 
     # Handle portfolio simulation — build a fresh pie chart and return the new portfolio
     portfolio_update = None
+    composition_for_suggestions = None  # set below when portfolio changes
     if called_tool == "simulate_portfolio_change_tool" and tool_results:
         new_tickers = tool_results["tickers"]
         new_weights  = tool_results["weights"]
         try:
             comp = get_portfolio_composition(new_tickers, new_weights)
             visualization = _build_visualization("portfolio_pie", comp, portfolio)
+            composition_for_suggestions = comp
         except Exception:
             visualization = {"type": None, "data": {}}
         portfolio_update = {
@@ -519,6 +696,22 @@ def run_agent(
             "weights":         new_weights,
             "period":          portfolio["period"],
             "changes_summary": tool_results.get("changes_summary", ""),
+        }
+    elif called_tool == "revert_to_original_portfolio_tool" and original_portfolio:
+        orig_tickers = original_portfolio["tickers"]
+        orig_weights = original_portfolio["weights"]
+        try:
+            comp = get_portfolio_composition(orig_tickers, orig_weights)
+            visualization = _build_visualization("portfolio_pie", comp, portfolio)
+            composition_for_suggestions = comp
+        except Exception:
+            visualization = {"type": None, "data": {}}
+        portfolio_update = {
+            "tickers":         orig_tickers,
+            "weights":         orig_weights,
+            "period":          portfolio["period"],
+            "changes_summary": "Reverted to original portfolio",
+            "is_revert":       True,
         }
     else:
         viz_type = _TOOL_VIZ_MAP.get(called_tool, "")
@@ -533,13 +726,12 @@ def run_agent(
             analysis_updates[key] = tool_results
             all_analysis[key] = tool_results
 
+    # Use the freshly computed composition when the portfolio changed; fall back to accumulated.
     suggestions = generate_smart_suggestions(
-        portfolio_composition=all_analysis.get("portfolio_composition"),
+        portfolio_composition=composition_for_suggestions or all_analysis.get("portfolio_composition"),
         sector_breakdown=all_analysis.get("sector_breakdown"),
-        sharpe_data=all_analysis.get("sharpe_data"),
-        returns_data=all_analysis.get("returns_data"),
-        drawdown_data=all_analysis.get("drawdown_data"),
-        var_data=all_analysis.get("var_data"),
+        last_question=question,
+        last_response=response_text,
     )
 
     return {

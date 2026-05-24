@@ -5,12 +5,21 @@ import pandas as pd
 VALID_PERIODS = {"1mo", "3mo", "6mo", "1y", "3y", "5y"}
 
 
-def calculate_portfolio_returns(tickers: list, weights: list, period: str = "1y") -> dict:
-    if period not in VALID_PERIODS:
+def calculate_portfolio_returns(
+    tickers: list,
+    weights: list,
+    period: str = "1y",
+    start_date: str = None,
+    end_date: str = None,
+) -> dict:
+    period = period or "1y"
+    dl_kwargs = {"start": start_date, "end": end_date} if (start_date and end_date) else {"period": period}
+    if not (start_date and end_date) and period not in VALID_PERIODS:
         raise ValueError(f"Invalid period '{period}'. Must be one of {sorted(VALID_PERIODS)}.")
+    period_label = f"{start_date} → {end_date}" if (start_date and end_date) else period
 
     try:
-        raw = yf.download(tickers, period=period, auto_adjust=True, progress=False)
+        raw = yf.download(tickers, auto_adjust=True, progress=False, **dl_kwargs)
     except Exception as e:
         raise RuntimeError(f"Failed to fetch data from yfinance: {e}")
 
@@ -70,7 +79,7 @@ def calculate_portfolio_returns(tickers: list, weights: list, period: str = "1y"
     return {
         "total_return_pct": round(float(total_return), 2),
         "daily_returns": daily_returns,
-        "period": period,
+        "period": period_label,
         "stock_contributions": stock_contributions,
         "best_performer": {"ticker": best["ticker"], "return_pct": best["return_pct"]},
         "worst_performer": {"ticker": worst["ticker"], "return_pct": worst["return_pct"]},

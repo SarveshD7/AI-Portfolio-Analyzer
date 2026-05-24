@@ -3,6 +3,7 @@ import io
 
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
@@ -463,6 +464,73 @@ def render_canvas(viz_type: str, viz_data: dict):
             f"CVaR shows the average loss beyond the VaR threshold — the 'average of the worst days'."
         )
 
+    # ── Beta metrics ─────────────────────────────────────────────────────────
+    elif viz_type == "metrics" and "beta" in viz_data:
+        beta      = viz_data.get("beta", 0)
+        alpha     = viz_data.get("alpha_pct", 0)
+        corr      = viz_data.get("correlation", 0)
+        r2        = viz_data.get("r_squared_pct", 0)
+        ann_port  = viz_data.get("annualized_port_return_pct", 0)
+        ann_bench = viz_data.get("annualized_bench_return_pct", 0)
+        benchmark = viz_data.get("benchmark", "")
+        period    = viz_data.get("period", "")
+
+        if beta > 1.2:
+            b_fg, b_bg, b_label, b_interp = (
+                DANGER, DANGER_BG, "Aggressive",
+                "This portfolio amplifies market moves — expect larger swings than the benchmark in both directions.",
+            )
+        elif beta > 0.8:
+            b_fg, b_bg, b_label, b_interp = (
+                PRIMARY, PRIMARY_BG, "Market-like",
+                "This portfolio tracks the market closely — returns and risk are broadly in line with the benchmark.",
+            )
+        elif beta >= 0:
+            b_fg, b_bg, b_label, b_interp = (
+                SUCCESS, SUCCESS_BG, "Defensive",
+                "This portfolio is less sensitive to market swings — useful for capital preservation in downturns.",
+            )
+        else:
+            b_fg, b_bg, b_label, b_interp = (
+                WARNING, WARNING_BG, "Inverse",
+                "This portfolio moves opposite to the market — may act as a natural hedge.",
+            )
+
+        alpha_fg = SUCCESS if alpha >= 0 else DANGER
+        alpha_sign = "+" if alpha >= 0 else ""
+
+        st.markdown(
+            f"""<div style="text-align:center;padding:28px 16px;background:{b_bg};
+              border-radius:14px;margin-bottom:20px;border:1px solid {b_fg}22">
+              <div style="font-size:11px;color:{b_fg};font-weight:600;
+                letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px">
+                Beta  ·  vs {benchmark}  ·  {period}
+              </div>
+              <div style="font-size:56px;font-weight:700;color:{b_fg};line-height:1;
+                letter-spacing:-1px">
+                {beta:.2f}
+              </div>
+              <div style="display:inline-block;margin-top:10px;background:{b_fg};
+                color:white;font-size:12px;font-weight:600;padding:3px 12px;
+                border-radius:20px;letter-spacing:.03em">
+                {b_label}
+              </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Alpha",             f"{alpha_sign}{alpha:.2f}%")
+        c2.metric("Correlation",       f"{corr:.2f}")
+        c3.metric("R²",                f"{r2:.1f}%")
+        c4.metric("Portfolio Return",  f"{ann_port:+.2f}%")
+        st.markdown(
+            f"<div style='font-size:12px;color:{alpha_fg};font-weight:600;margin-bottom:4px'>"
+            f"Alpha: {alpha_sign}{alpha:.2f}% — {'outperforming' if alpha >= 0 else 'underperforming'} "
+            f"the benchmark on a risk-adjusted basis.</div>",
+            unsafe_allow_html=True,
+        )
+        st.info(b_interp)
+
     # ── Sharpe metrics ────────────────────────────────────────────────────────
     elif viz_type == "metrics":
         sharpe = viz_data.get("sharpe_ratio", 0)
@@ -848,6 +916,117 @@ def render_canvas(viz_type: str, viz_data: dict):
                     rw_df.columns = ["Ticker", "Original Weight (%)", "Modified Weight (%)", "Δ (%)"]
                     st.dataframe(rw_df, use_container_width=True, hide_index=True)
 
+    # ── Rolling metrics chart ─────────────────────────────────────────────────
+    elif viz_type == "rolling_metrics_chart":
+        vol_df    = pd.DataFrame(viz_data.get("rolling_volatility", []))
+        sharpe_df = pd.DataFrame(viz_data.get("rolling_sharpe",     []))
+        var_df    = pd.DataFrame(viz_data.get("rolling_var_95",     []))
+
+        if not vol_df.empty:
+            period = viz_data.get("period", "")
+            window = viz_data.get("window_days", 30)
+
+            fig = make_subplots(
+                rows=3, cols=1,
+                shared_xaxes=True,
+                vertical_spacing=0.07,
+                subplot_titles=[
+                    "Rolling Volatility (Ann. %)",
+                    "Rolling Sharpe Ratio",
+                    "Rolling VaR 95% (%)",
+                ],
+            )
+
+            fig.add_trace(go.Scatter(
+                x=vol_df["date"], y=vol_df["value"],
+                mode="lines",
+                line=dict(color=WARNING, width=2),
+                fill="tozeroy",
+                fillcolor="rgba(217,119,6,0.06)",
+                name="Volatility",
+                hovertemplate="%{x}<br><b>%{y:.2f}%</b><extra>Volatility</extra>",
+            ), row=1, col=1)
+
+            fig.add_trace(go.Scatter(
+                x=sharpe_df["date"], y=sharpe_df["value"],
+                mode="lines",
+                line=dict(color=PRIMARY, width=2),
+                fill="tozeroy",
+                fillcolor="rgba(37,99,235,0.06)",
+                name="Sharpe",
+                hovertemplate="%{x}<br><b>%{y:.2f}</b><extra>Sharpe</extra>",
+            ), row=2, col=1)
+            fig.add_hline(y=0, line_color=BORDER, line_width=1, line_dash="dot", row=2, col=1)
+
+            fig.add_trace(go.Scatter(
+                x=var_df["date"], y=var_df["value"],
+                mode="lines",
+                line=dict(color=DANGER, width=2),
+                fill="tozeroy",
+                fillcolor="rgba(220,38,38,0.06)",
+                name="VaR 95%",
+                hovertemplate="%{x}<br><b>%{y:.2f}%</b><extra>VaR 95%</extra>",
+            ), row=3, col=1)
+
+            fig.update_layout(
+                height=540,
+                margin=dict(t=52, b=36, l=8, r=8),
+                plot_bgcolor=SURFACE,
+                paper_bgcolor=SURFACE,
+                font=dict(family="Inter, sans-serif", size=11, color=MUTED),
+                title=dict(
+                    text=f"Rolling Risk Metrics  ·  {window}-day window  ·  {period}",
+                    font=dict(size=13, color=TEXT, family="Inter, sans-serif"),
+                    x=0, xanchor="left",
+                    pad=dict(l=4, t=2),
+                ),
+                showlegend=False,
+                hoverlabel=dict(
+                    bgcolor=SURFACE, bordercolor=BORDER,
+                    font=dict(size=12, family="Inter, sans-serif", color=TEXT),
+                ),
+                modebar=dict(bgcolor="rgba(0,0,0,0)", color=MUTED_LT, activecolor=PRIMARY),
+            )
+            fig.update_xaxes(
+                showgrid=True, gridcolor="#f1f5f9", gridwidth=1,
+                linecolor=BORDER, linewidth=1, zeroline=False,
+                tickfont=dict(size=11, color=MUTED),
+            )
+            fig.update_yaxes(
+                showgrid=True, gridcolor="#f1f5f9", gridwidth=1,
+                linecolor=BORDER, linewidth=1, zeroline=False,
+                tickfont=dict(size=11, color=MUTED),
+            )
+            fig.update_yaxes(ticksuffix="%", row=1, col=1)
+            fig.update_yaxes(ticksuffix="%", row=3, col=1)
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            current_vol    = viz_data.get("current_vol_pct",    0)
+            current_sharpe = viz_data.get("current_sharpe",     0)
+            current_var    = viz_data.get("current_var_95_pct", 0)
+            risk_trend     = viz_data.get("risk_trend",         "stable")
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Current Volatility", f"{current_vol:.2f}%")
+            c2.metric("Current Sharpe",     f"{current_sharpe:.2f}")
+            c3.metric("Current VaR 95%",    f"{current_var:.2f}%")
+
+            trend_cfg = {
+                "increasing": (DANGER,  DANGER_BG,  "Risk increasing ↑"),
+                "decreasing": (SUCCESS, SUCCESS_BG, "Risk decreasing ↓"),
+                "stable":     (MUTED,   GRAY_BG,    "Risk stable →"),
+            }
+            t_fg, t_bg, t_label = trend_cfg.get(risk_trend, (MUTED, GRAY_BG, "Risk stable →"))
+            st.markdown(
+                f"""<div style="display:inline-flex;align-items:center;gap:8px;
+                  background:{t_bg};border:1px solid {t_fg}33;
+                  border-radius:8px;padding:8px 18px;margin-top:10px">
+                  <span style="font-size:14px;font-weight:700;color:{t_fg}">{t_label}</span>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
     # ── Empty state ───────────────────────────────────────────────────────────
     else:
         st.markdown(
@@ -902,23 +1081,21 @@ def _call_api(portfolio: dict, prompt: str):
                     "weights": portfolio_update["weights"],
                     "period":  portfolio_update.get("period", p["period"]),
                 }
-                st.session_state.portfolio_is_modified = True
-                st.session_state.modification_history.append({
-                    "summary": portfolio_update.get("changes_summary", ""),
-                    "tickers": portfolio_update["tickers"],
-                    "weights": portfolio_update["weights"],
-                })
-                st.session_state.current_suggestions = [
-                    {"text": "Check returns", "query": "How did my portfolio perform over the last year?", "action": "_mod_compare", "priority": "high"},
-                    {"text": "Check risk profile", "query": "What is the Sharpe ratio of my portfolio?", "action": "_mod_risk", "priority": "medium"},
-                    {"text": "Show composition", "query": "Show me my portfolio composition", "action": "_mod_composition", "priority": "low"},
-                ]
-            else:
-                explored_set = set(st.session_state.explored_suggestions)
-                st.session_state.current_suggestions = [
-                    s for s in result.get("suggestions", [])
-                    if s["action"] not in explored_set
-                ]
+                if portfolio_update.get("is_revert"):
+                    st.session_state.portfolio_is_modified = False
+                    st.session_state.modification_history = []
+                else:
+                    st.session_state.portfolio_is_modified = True
+                    st.session_state.modification_history.append({
+                        "summary": portfolio_update.get("changes_summary", ""),
+                        "tickers": portfolio_update["tickers"],
+                        "weights": portfolio_update["weights"],
+                    })
+            explored_set = set(st.session_state.explored_suggestions)
+            st.session_state.current_suggestions = [
+                s for s in result.get("suggestions", [])
+                if s["action"] not in explored_set
+            ]
             return True
         else:
             try:
@@ -1284,21 +1461,12 @@ else:
             st.session_state.modification_history[-1]["summary"]
             if st.session_state.modification_history else ""
         )
-        _chg_col, _rev_col = st.columns([5, 1])
-        with _chg_col:
-            if last_summary:
-                st.markdown(
-                    f'<div style="font-size:11.5px;color:{MUTED};padding:2px 0 12px">'
-                    f'📝 {html_lib.escape(last_summary)}</div>',
-                    unsafe_allow_html=True,
-                )
-        with _rev_col:
-            if st.button("↩ Revert", key="revert_btn", type="secondary", use_container_width=True):
-                st.session_state.current_portfolio     = dict(_orig_port)
-                st.session_state.portfolio_is_modified = False
-                st.session_state.modification_history  = []
-                st.session_state.current_suggestions   = []
-                st.rerun()
+        if last_summary:
+            st.markdown(
+                f'<div style="font-size:11.5px;color:{MUTED};padding:2px 0 12px">'
+                f'📝 {html_lib.escape(last_summary)}</div>',
+                unsafe_allow_html=True,
+            )
     else:
         tickers = portfolio["tickers"]
         weights = portfolio["weights"]

@@ -64,5 +64,5 @@ def analyze_concentration(tickers: list, weights: list, breakdown_type: str = "s
         "breakdown": breakdown,
         "breakdown_type": breakdown_type,
         "dominant": dominant,
-        "concentration_warning": dominant["weight_pct"] > 50,
+        "concentration_warning": dominant["weight_pct"] > 30,
     }

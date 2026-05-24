@@ -8,9 +8,10 @@ import yfinance as yf
 VALID_PERIODS = {"1mo", "3mo", "6mo", "1y", "3y", "5y"}
 
 
-def _portfolio_metrics(tickers: list, weights: list, period: str) -> dict:
+def _portfolio_metrics(tickers: list, weights: list, period: str, start_date=None, end_date=None) -> dict:
+    dl_kwargs = {"start": start_date, "end": end_date} if (start_date and end_date) else {"period": period}
     try:
-        raw = yf.download(tickers, period=period, auto_adjust=True, progress=False)
+        raw = yf.download(tickers, auto_adjust=True, progress=False, **dl_kwargs)
     except Exception as e:
         raise RuntimeError(f"Failed to fetch data: {e}")
 
@@ -56,12 +57,16 @@ def compare_portfolios(
     modified_tickers: list,
     modified_weights: list,
     period: str = "1y",
+    start_date: str = None,
+    end_date: str = None,
 ) -> dict:
-    if period not in VALID_PERIODS:
+    period = period or "1y"
+    if not (start_date and end_date) and period not in VALID_PERIODS:
         raise ValueError(f"Invalid period '{period}'. Must be one of {sorted(VALID_PERIODS)}.")
+    period_label = f"{start_date} → {end_date}" if (start_date and end_date) else period
 
-    orig = _portfolio_metrics(original_tickers, original_weights, period)
-    mod  = _portfolio_metrics(modified_tickers, modified_weights, period)
+    orig = _portfolio_metrics(original_tickers, original_weights, period, start_date, end_date)
+    mod  = _portfolio_metrics(modified_tickers, modified_weights, period, start_date, end_date)
 
     orig_map = dict(zip(original_tickers, original_weights))
     mod_map  = dict(zip(modified_tickers,  modified_weights))
@@ -118,7 +123,7 @@ def compare_portfolios(
             "modified":        mod["max_drawdown_pct"],
             "delta":           round(mod["max_drawdown_pct"] - orig["max_drawdown_pct"], 2),
             "unit":            "%",
-            "higher_is_better": False,
+            "higher_is_better": True,  # values are negative; -5% > -20% means smaller drawdown = better
         },
     ]
 
@@ -131,5 +136,5 @@ def compare_portfolios(
             "removed":        sorted(orig_set - mod_set),
             "weight_changes": weight_changes,
         },
-        "period":           period,
+        "period":           period_label,
     }
