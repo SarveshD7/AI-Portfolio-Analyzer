@@ -389,18 +389,3 @@ AI-Portfolio-Analyzer/
 Returns `{ "status": "ok" }`. Use for liveness checks.
 
 ---
-
-## Contributing
-
-Pull requests are welcome. For significant changes, please open an issue first to discuss the approach.
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/your-feature`)
-3. Commit your changes
-4. Push to the branch and open a Pull Request
-
----
-
-## License
-
-MIT
