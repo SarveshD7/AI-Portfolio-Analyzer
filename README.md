@@ -13,6 +13,8 @@ Kalpi is an AI-powered investment analysis tool that lets you interrogate your p
 | <img width="800" alt="Chat + Canvas Interface" src="https://github.com/user-attachments/assets/4d1816f7-8121-4e14-8680-3e7ea659a853" /> |
 | **Rolling Risk Metrics** |
 | <img width="800" alt="Rolling Risk Metrics" src="https://github.com/user-attachments/assets/b9ef8b82-4680-4eb6-8ead-ab980ac4a137" /> |
+| **Portfolio Correlations** | 
+| <img width="1917" height="971" alt="image" src="https://github.com/user-attachments/assets/a95a1e4e-5b6b-42cc-82bc-7d4e69e9a667" /> |
 
 ---
 
