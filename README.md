@@ -5,7 +5,7 @@ Kalpi is an AI-powered investment analysis tool that lets you interrogate your p
 ---
 
 ## Demo
-[Complete Demo Video](https://www.loom.com/share/7b5582b943ae483981c24ab03fa638f1)
+[Demonstration Walthrough](https://www.loom.com/share/7b5582b943ae483981c24ab03fa638f1)
 | Feature Screenshots |
 |:---:|
 | **Chat + Canvas Interface** |
